@@ -99,12 +99,13 @@ This module can be used two ways:
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import re
 import time
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote
 
@@ -1016,3 +1017,135 @@ def search_listings_filtered(
             time.sleep(delay)
 
     return listings
+
+
+# ============================================================
+# Flatten / output
+# ============================================================
+
+# Fields worth pulling to the front of the CSV; everything else discovered
+# on a listing (which has no fixed schema - AutoUncle can add/omit fields
+# per listing) is appended afterwards, sorted alphabetically, so nothing is
+# ever silently dropped.
+PRIORITY_FIELDS = [
+    "id",
+    "make",
+    "model",
+    "year",
+    "price",
+    "priceCurrency",
+    "mileageKm",
+    "fuelType",
+    "transmission",
+    "bodyType",
+    "enginePowerPs",
+    "enginePowerKw",
+    "priceRatingLabel",
+    "savingsVsMarketChf",
+    "daysOnMarket",
+    "addressLocality",
+    "addressRegion",
+    "postalCode",
+    "addressCountry",
+    "dealerName",
+    "sourcePlatform",
+    "url",
+]
+
+
+def _scalarize(value: Any) -> Any:
+    """Turn a nested dict/list value into something that fits one CSV cell."""
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        for key in ("name", "date", "value"):
+            if key in value and not isinstance(value[key], (dict, list)):
+                return value[key]
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    if isinstance(value, list):
+        return "; ".join(str(_scalarize(v)) for v in value)
+    return str(value)
+
+
+def flatten_listing(item: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a listing (any shape produced by search_listings(),
+    search_listings_filtered(), or fetch_detail()) into one flat dict
+    covering every field present, so nothing is lost. A handful of shapes
+    specific to this scraper (not present in the AutoScout24 reference) get
+    a dedicated, documented flattening rule instead of the generic one:
+
+    - "priceHistory" (list of {date, price, ...}) -> one semicolon-joined
+      cell of "<date>=<price>" entries, e.g. "2026-07-04T...=5500; ...".
+    - "otherProperties" (list of {name, value}, from unrecognized
+      additionalProperty labels) -> semicolon-joined "<name>=<value>".
+    - "imageUrls" (list of gallery URLs) -> semicolon-joined.
+    - "equipment" (dict, variable keys per listing) -> "parent_child"
+      columns, e.g. "equipment_Klimaanlage", same convention as any other
+      nested dict below.
+
+    Everything else follows the reference project's convention: nested
+    dicts become "parent_child" columns, lists are semicolon-joined,
+    scalars pass through _scalarize()."""
+    flat: dict[str, Any] = {}
+    for key, value in item.items():
+        if key == "priceHistory" and isinstance(value, list):
+            flat[key] = "; ".join(f"{h.get('date')}={h.get('price')}" for h in value)
+            continue
+        if key == "otherProperties" and isinstance(value, list):
+            flat[key] = "; ".join(f"{p.get('name')}={p.get('value')}" for p in value)
+            continue
+        if key == "imageUrls" and isinstance(value, list):
+            flat[key] = "; ".join(str(v) for v in value)
+            continue
+        if isinstance(value, dict):
+            for sub_key, sub_value in value.items():
+                flat[f"{key}_{sub_key}"] = _scalarize(sub_value)
+            continue
+        flat[key] = _scalarize(value)
+    return flat
+
+
+def order_fieldnames(all_keys: Iterable[str]) -> list[str]:
+    ordered = [f for f in PRIORITY_FIELDS if f in all_keys]
+    remaining = sorted(k for k in all_keys if k not in ordered)
+    return ordered + remaining
+
+
+def save_csv(rows: list[dict[str, Any]], path: str) -> None:
+    if not rows:
+        logger.warning("no rows to write")
+        return
+    all_keys: set[str] = set()
+    for row in rows:
+        all_keys.update(row.keys())
+    fieldnames = order_fieldnames(all_keys)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def save_json(rows: list[dict[str, Any]], path: str) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=2)
+
+
+@dataclass
+class ScrapeResult:
+    """Everything a scrape() call produced, ready to use in-memory or save to disk."""
+
+    make: str  # resolved brand, e.g. "VW"
+    model: str  # resolved model, e.g. "Golf"
+    domain: str  # domain that was scraped, e.g. "ch"
+    filtered: bool  # True if any price/mileage/year filter was applied
+    total_reported: int | None  # total match count the site itself reported, if known
+    listings: list[dict[str, Any]] = field(default_factory=list)  # raw parsed records
+    rows: list[dict[str, Any]] = field(default_factory=list)  # flattened dicts, one per listing, CSV-ready
+
+    def to_csv(self, path: str) -> None:
+        save_csv(self.rows, path)
+
+    def to_json(self, path: str) -> None:
+        save_json(self.listings, path)
