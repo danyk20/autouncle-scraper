@@ -1,0 +1,2565 @@
+{
+  "bodyTypes": [
+    "Hatchback",
+    "Sedan",
+    "Stationcar",
+    "MPV",
+    "SUV",
+    "Cabriolet",
+    "Coupe"
+  ],
+  "brands": {
+    "all": [
+      "VW",
+      "Audi",
+      "BMW",
+      "Tesla",
+      "Alfa Romeo"
+    ],
+    "popular": [
+      "VW",
+      "BMW",
+      "Audi"
+    ]
+  },
+  "carModelsByBrandDetailed": {
+    "allBrands": [
+      {
+        "brand": "Alfa Romeo",
+        "count": 2167,
+        "allSeriesAndModels": [
+          {
+            "series": "other",
+            "count": 2167,
+            "models": [
+              {
+                "model": "145",
+                "count": 0
+              },
+              {
+                "model": "146",
+                "count": 2
+              },
+              {
+                "model": "147",
+                "count": 25
+              },
+              {
+                "model": "147 GTA",
+                "count": 24
+              },
+              {
+                "model": "155",
+                "count": 7
+              },
+              {
+                "model": "156",
+                "count": 8
+              },
+              {
+                "model": "156 GTA",
+                "count": 20
+              },
+              {
+                "model": "159",
+                "count": 35
+              },
+              {
+                "model": "164",
+                "count": 7
+              },
+              {
+                "model": "166",
+                "count": 8
+              },
+              {
+                "model": "1750",
+                "count": 11
+              },
+              {
+                "model": "1900",
+                "count": 2
+              },
+              {
+                "model": "2000",
+                "count": 20
+              },
+              {
+                "model": "2600",
+                "count": 3
+              },
+              {
+                "model": "33",
+                "count": 3
+              },
+              {
+                "model": "33 Stradale",
+                "count": 0
+              },
+              {
+                "model": "4C",
+                "count": 16
+              },
+              {
+                "model": "4C Spider",
+                "count": 4
+              },
+              {
+                "model": "6C",
+                "count": 0
+              },
+              {
+                "model": "75",
+                "count": 5
+              },
+              {
+                "model": "8C",
+                "count": 0
+              },
+              {
+                "model": "8C Competizione",
+                "count": 0
+              },
+              {
+                "model": "8C Spider",
+                "count": 1
+              },
+              {
+                "model": "90",
+                "count": 2
+              },
+              {
+                "model": "Alfa 6",
+                "count": 1
+              },
+              {
+                "model": "Alfasud",
+                "count": 0
+              },
+              {
+                "model": "Alfasud Sprint",
+                "count": 0
+              },
+              {
+                "model": "Alfetta",
+                "count": 5
+              },
+              {
+                "model": "Alfetta GT/GTV",
+                "count": 2
+              },
+              {
+                "model": "Arna",
+                "count": 0
+              },
+              {
+                "model": "Brera",
+                "count": 12
+              },
+              {
+                "model": "C-SUV",
+                "count": 0
+              },
+              {
+                "model": "Crosswagon",
+                "count": 1
+              },
+              {
+                "model": "D-SUV",
+                "count": 0
+              },
+              {
+                "model": "Dauphine",
+                "count": 0
+              },
+              {
+                "model": "Giardinetta",
+                "count": 2
+              },
+              {
+                "model": "Giulia",
+                "count": 279
+              },
+              {
+                "model": "Giulia 1300",
+                "count": 1
+              },
+              {
+                "model": "Giulia Saloon",
+                "count": 0
+              },
+              {
+                "model": "Giulia Spider",
+                "count": 1
+              },
+              {
+                "model": "Giulia Sprint",
+                "count": 11
+              },
+              {
+                "model": "Giulia Sprint Speciale",
+                "count": 0
+              },
+              {
+                "model": "Giulia TZ",
+                "count": 0
+              },
+              {
+                "model": "Giulietta",
+                "count": 182
+              },
+              {
+                "model": "Gran Sport Quattroruote",
+                "count": 0
+              },
+              {
+                "model": "GT",
+                "count": 21
+              },
+              {
+                "model": "GT Junior",
+                "count": 237
+              },
+              {
+                "model": "GTA",
+                "count": 1
+              },
+              {
+                "model": "GTV",
+                "count": 25
+              },
+              {
+                "model": "Junior",
+                "count": 111
+              },
+              {
+                "model": "Matta",
+                "count": 0
+              },
+              {
+                "model": "MiTo",
+                "count": 94
+              },
+              {
+                "model": "Montreal",
+                "count": 9
+              },
+              {
+                "model": "Spider",
+                "count": 155
+              },
+              {
+                "model": "Sprint",
+                "count": 10
+              },
+              {
+                "model": "Stelvio",
+                "count": 492
+              },
+              {
+                "model": "SZ/RZ",
+                "count": 4
+              },
+              {
+                "model": "Tonale",
+                "count": 308
+              }
+            ]
+          }
+        ],
+        "popularModels": [
+          {
+            "model": "Stelvio",
+            "count": 492
+          },
+          {
+            "model": "Tonale",
+            "count": 308
+          },
+          {
+            "model": "Giulia",
+            "count": 279
+          },
+          {
+            "model": "GT Junior",
+            "count": 237
+          },
+          {
+            "model": "Giulietta",
+            "count": 182
+          }
+        ]
+      },
+      {
+        "brand": "Audi",
+        "count": 16467,
+        "allSeriesAndModels": [
+          {
+            "series": "A1 Series",
+            "count": 1237,
+            "models": [
+              {
+                "model": "A1",
+                "count": 142
+              },
+              {
+                "model": "A1 e-tron",
+                "count": 0
+              },
+              {
+                "model": "A1 Sportback",
+                "count": 1059
+              },
+              {
+                "model": "S1",
+                "count": 9
+              },
+              {
+                "model": "S1 Sportback",
+                "count": 27
+              }
+            ]
+          },
+          {
+            "series": "A2 Series",
+            "count": 10,
+            "models": [
+              {
+                "model": "A2",
+                "count": 7
+              },
+              {
+                "model": "RS2",
+                "count": 2
+              },
+              {
+                "model": "S2",
+                "count": 1
+              }
+            ]
+          },
+          {
+            "series": "A3 Series",
+            "count": 2698,
+            "models": [
+              {
+                "model": "A3",
+                "count": 1104
+              },
+              {
+                "model": "A3 Cabriolet",
+                "count": 53
+              },
+              {
+                "model": "A3 e-tron",
+                "count": 24
+              },
+              {
+                "model": "A3 Sportback",
+                "count": 0
+              },
+              {
+                "model": "A3 Sportback e-tron",
+                "count": 375
+              },
+              {
+                "model": "A3 Sportback g-tron",
+                "count": 0
+              },
+              {
+                "model": "RS3",
+                "count": 374
+              },
+              {
+                "model": "RS3 Sportback",
+                "count": 378
+              },
+              {
+                "model": "S3",
+                "count": 381
+              },
+              {
+                "model": "S3 Cabriolet",
+                "count": 9
+              },
+              {
+                "model": "S3 Sportback",
+                "count": 0
+              }
+            ]
+          },
+          {
+            "series": "A4 Series",
+            "count": 1294,
+            "models": [
+              {
+                "model": "A4",
+                "count": 790
+              },
+              {
+                "model": "A4 Allroad",
+                "count": 68
+              },
+              {
+                "model": "A4 Cabriolet",
+                "count": 26
+              },
+              {
+                "model": "RS4",
+                "count": 276
+              },
+              {
+                "model": "S4",
+                "count": 131
+              },
+              {
+                "model": "S4 Cabriolet",
+                "count": 3
+              }
+            ]
+          },
+          {
+            "series": "A5 Series",
+            "count": 1020,
+            "models": [
+              {
+                "model": "A5",
+                "count": 382
+              },
+              {
+                "model": "A5 Cabriolet",
+                "count": 53
+              },
+              {
+                "model": "A5 Sportback",
+                "count": 171
+              },
+              {
+                "model": "RS5",
+                "count": 128
+              },
+              {
+                "model": "RS5 Sportback",
+                "count": 31
+              },
+              {
+                "model": "S5",
+                "count": 148
+              },
+              {
+                "model": "S5 Cabriolet",
+                "count": 52
+              },
+              {
+                "model": "S5 Sportback",
+                "count": 55
+              }
+            ]
+          },
+          {
+            "series": "A6 Series",
+            "count": 1690,
+            "models": [
+              {
+                "model": "A6",
+                "count": 914
+              },
+              {
+                "model": "A6 Allroad",
+                "count": 72
+              },
+              {
+                "model": "A6 e-tron",
+                "count": 137
+              },
+              {
+                "model": "RS6",
+                "count": 413
+              },
+              {
+                "model": "RS6 e-tron",
+                "count": 0
+              },
+              {
+                "model": "S6",
+                "count": 113
+              },
+              {
+                "model": "S6 e-tron",
+                "count": 41
+              }
+            ]
+          },
+          {
+            "series": "A7 Series",
+            "count": 197,
+            "models": [
+              {
+                "model": "A7",
+                "count": 13
+              },
+              {
+                "model": "A7 Sportback",
+                "count": 100
+              },
+              {
+                "model": "RS7",
+                "count": 9
+              },
+              {
+                "model": "RS7 Sportback",
+                "count": 56
+              },
+              {
+                "model": "S7",
+                "count": 1
+              },
+              {
+                "model": "S7 Sportback",
+                "count": 18
+              }
+            ]
+          },
+          {
+            "series": "A8 Series",
+            "count": 306,
+            "models": [
+              {
+                "model": "A8",
+                "count": 105
+              },
+              {
+                "model": "A8L",
+                "count": 12
+              },
+              {
+                "model": "A8L W12",
+                "count": 4
+              },
+              {
+                "model": "R8 Coupé",
+                "count": 96
+              },
+              {
+                "model": "R8 GT",
+                "count": 0
+              },
+              {
+                "model": "R8 Spyder",
+                "count": 45
+              },
+              {
+                "model": "S8",
+                "count": 36
+              },
+              {
+                "model": "S8 plus",
+                "count": 8
+              }
+            ]
+          },
+          {
+            "series": "Q1 Series",
+            "count": 0,
+            "models": [
+              {
+                "model": "Q1",
+                "count": 0
+              }
+            ]
+          },
+          {
+            "series": "Q2 Series",
+            "count": 636,
+            "models": [
+              {
+                "model": "Q2",
+                "count": 559
+              },
+              {
+                "model": "SQ2",
+                "count": 77
+              }
+            ]
+          },
+          {
+            "series": "Q3 Series",
+            "count": 2416,
+            "models": [
+              {
+                "model": "Q3",
+                "count": 1389
+              },
+              {
+                "model": "Q3 Sportback",
+                "count": 846
+              },
+              {
+                "model": "RS Q3",
+                "count": 89
+              },
+              {
+                "model": "RS Q3 Sportback",
+                "count": 92
+              }
+            ]
+          },
+          {
+            "series": "Q4 Series",
+            "count": 756,
+            "models": [
+              {
+                "model": "Q4 e-tron",
+                "count": 559
+              },
+              {
+                "model": "Q4 Sportback e-tron",
+                "count": 197
+              }
+            ]
+          },
+          {
+            "series": "Q5 Series",
+            "count": 1817,
+            "models": [
+              {
+                "model": "Q5",
+                "count": 1046
+              },
+              {
+                "model": "Q5 Sportback",
+                "count": 284
+              },
+              {
+                "model": "SQ5",
+                "count": 375
+              },
+              {
+                "model": "SQ5 Sportback",
+                "count": 112
+              }
+            ]
+          },
+          {
+            "series": "Q6 Series",
+            "count": 280,
+            "models": [
+              {
+                "model": "Q6 e-tron",
+                "count": 164
+              },
+              {
+                "model": "Q6 Sportback e-tron",
+                "count": 46
+              },
+              {
+                "model": "SQ6 e-tron",
+                "count": 50
+              },
+              {
+                "model": "SQ6 Sportback e-tron",
+                "count": 20
+              }
+            ]
+          },
+          {
+            "series": "Q7 Series",
+            "count": 396,
+            "models": [
+              {
+                "model": "Q7",
+                "count": 270
+              },
+              {
+                "model": "SQ7",
+                "count": 126
+              }
+            ]
+          },
+          {
+            "series": "Q8 Series",
+            "count": 545,
+            "models": [
+              {
+                "model": "Q8",
+                "count": 225
+              },
+              {
+                "model": "Q8 e-tron",
+                "count": 98
+              },
+              {
+                "model": "Q8 Sportback e-tron",
+                "count": 0
+              },
+              {
+                "model": "RS Q8",
+                "count": 150
+              },
+              {
+                "model": "SQ8",
+                "count": 65
+              },
+              {
+                "model": "SQ8 e-tron",
+                "count": 3
+              },
+              {
+                "model": "SQ8 Sportback e-tron",
+                "count": 4
+              }
+            ]
+          },
+          {
+            "series": "TT Series",
+            "count": 244,
+            "models": [
+              {
+                "model": "TT",
+                "count": 76
+              },
+              {
+                "model": "TT Roadster",
+                "count": 106
+              },
+              {
+                "model": "TT RS",
+                "count": 28
+              },
+              {
+                "model": "TTS",
+                "count": 34
+              }
+            ]
+          },
+          {
+            "series": "other",
+            "count": 925,
+            "models": [
+              {
+                "model": "100",
+                "count": 11
+              },
+              {
+                "model": "200",
+                "count": 25
+              },
+              {
+                "model": "50",
+                "count": 14
+              },
+              {
+                "model": "80",
+                "count": 13
+              },
+              {
+                "model": "90",
+                "count": 7
+              },
+              {
+                "model": "Cabriolet",
+                "count": 18
+              },
+              {
+                "model": "Coupe GT",
+                "count": 1
+              },
+              {
+                "model": "Coupé",
+                "count": 15
+              },
+              {
+                "model": "e-tron",
+                "count": 431
+              },
+              {
+                "model": "e-tron GT quattro",
+                "count": 97
+              },
+              {
+                "model": "e-tron Sportback",
+                "count": 184
+              },
+              {
+                "model": "F103",
+                "count": 0
+              },
+              {
+                "model": "NSU RO 80",
+                "count": 0
+              },
+              {
+                "model": "Q5 e-tron",
+                "count": 0
+              },
+              {
+                "model": "Quattro",
+                "count": 32
+              },
+              {
+                "model": "RS e-tron GT",
+                "count": 34
+              },
+              {
+                "model": "V8",
+                "count": 43
+              }
+            ]
+          }
+        ],
+        "popularModels": [
+          {
+            "model": "Q3",
+            "count": 1389
+          },
+          {
+            "model": "A3",
+            "count": 1104
+          },
+          {
+            "model": "A1 Sportback",
+            "count": 1059
+          },
+          {
+            "model": "Q5",
+            "count": 1046
+          },
+          {
+            "model": "A6",
+            "count": 914
+          }
+        ]
+      },
+      {
+        "brand": "BMW",
+        "count": 17840,
+        "allSeriesAndModels": [
+          {
+            "series": "1-Series",
+            "count": 1555,
+            "models": [
+              {
+                "model": "114",
+                "count": 16
+              },
+              {
+                "model": "116",
+                "count": 214
+              },
+              {
+                "model": "118",
+                "count": 289
+              },
+              {
+                "model": "118 Cabriolet",
+                "count": 28
+              },
+              {
+                "model": "118 Coupé",
+                "count": 4
+              },
+              {
+                "model": "120",
+                "count": 332
+              },
+              {
+                "model": "120 Cabriolet",
+                "count": 16
+              },
+              {
+                "model": "120 Coupé",
+                "count": 9
+              },
+              {
+                "model": "123",
+                "count": 121
+              },
+              {
+                "model": "123 Cabriolet",
+                "count": 1
+              },
+              {
+                "model": "123 Coupé",
+                "count": 3
+              },
+              {
+                "model": "125",
+                "count": 17
+              },
+              {
+                "model": "125 Cabriolet",
+                "count": 6
+              },
+              {
+                "model": "125 Coupé",
+                "count": 1
+              },
+              {
+                "model": "128",
+                "count": 50
+              },
+              {
+                "model": "130",
+                "count": 10
+              },
+              {
+                "model": "135 Cabriolet",
+                "count": 12
+              },
+              {
+                "model": "135 Coupé",
+                "count": 4
+              },
+              {
+                "model": "1M",
+                "count": 17
+              },
+              {
+                "model": "M135",
+                "count": 405
+              }
+            ]
+          },
+          {
+            "series": "2-Series",
+            "count": 1640,
+            "models": [
+              {
+                "model": "214",
+                "count": 0
+              },
+              {
+                "model": "214 Active Tourer",
+                "count": 0
+              },
+              {
+                "model": "214 Gran Tourer",
+                "count": 0
+              },
+              {
+                "model": "216",
+                "count": 2
+              },
+              {
+                "model": "216 Active Tourer",
+                "count": 5
+              },
+              {
+                "model": "216 Gran Tourer",
+                "count": 25
+              },
+              {
+                "model": "218",
+                "count": 58
+              },
+              {
+                "model": "218 Active Tourer",
+                "count": 169
+              },
+              {
+                "model": "218 Gran Tourer",
+                "count": 118
+              },
+              {
+                "model": "220",
+                "count": 93
+              },
+              {
+                "model": "220 Active Tourer",
+                "count": 81
+              },
+              {
+                "model": "220 Gran Tourer",
+                "count": 66
+              },
+              {
+                "model": "223",
+                "count": 1
+              },
+              {
+                "model": "223 Active Tourer",
+                "count": 248
+              },
+              {
+                "model": "225",
+                "count": 16
+              },
+              {
+                "model": "225 Active Tourer",
+                "count": 173
+              },
+              {
+                "model": "228",
+                "count": 6
+              },
+              {
+                "model": "230",
+                "count": 54
+              },
+              {
+                "model": "230e Active Tourer",
+                "count": 78
+              },
+              {
+                "model": "M2",
+                "count": 292
+              },
+              {
+                "model": "M235",
+                "count": 155
+              }
+            ]
+          },
+          {
+            "series": "3-Series",
+            "count": 2856,
+            "models": [
+              {
+                "model": "315",
+                "count": 0
+              },
+              {
+                "model": "316",
+                "count": 18
+              },
+              {
+                "model": "316 Compact",
+                "count": 10
+              },
+              {
+                "model": "318",
+                "count": 140
+              },
+              {
+                "model": "318 Cabriolet",
+                "count": 13
+              },
+              {
+                "model": "318 Compact",
+                "count": 4
+              },
+              {
+                "model": "318 Gran Turismo",
+                "count": 1
+              },
+              {
+                "model": "320",
+                "count": 720
+              },
+              {
+                "model": "320 Cabriolet",
+                "count": 46
+              },
+              {
+                "model": "320 Gran Turismo",
+                "count": 15
+              },
+              {
+                "model": "320e",
+                "count": 39
+              },
+              {
+                "model": "323",
+                "count": 15
+              },
+              {
+                "model": "323 Cabriolet",
+                "count": 3
+              },
+              {
+                "model": "323 Compact",
+                "count": 2
+              },
+              {
+                "model": "324",
+                "count": 2
+              },
+              {
+                "model": "325",
+                "count": 153
+              },
+              {
+                "model": "325 Cabriolet",
+                "count": 46
+              },
+              {
+                "model": "325 Gran Turismo",
+                "count": 0
+              },
+              {
+                "model": "328",
+                "count": 61
+              },
+              {
+                "model": "328 Cabriolet",
+                "count": 16
+              },
+              {
+                "model": "328 Gran Turismo",
+                "count": 8
+              },
+              {
+                "model": "330",
+                "count": 375
+              },
+              {
+                "model": "330 Cabriolet",
+                "count": 27
+              },
+              {
+                "model": "330 Gran Turismo",
+                "count": 3
+              },
+              {
+                "model": "330e",
+                "count": 121
+              },
+              {
+                "model": "333",
+                "count": 0
+              },
+              {
+                "model": "335",
+                "count": 107
+              },
+              {
+                "model": "335 Cabriolet",
+                "count": 28
+              },
+              {
+                "model": "335 Gran Turismo",
+                "count": 13
+              },
+              {
+                "model": "340",
+                "count": 19
+              },
+              {
+                "model": "340 Gran Turismo",
+                "count": 3
+              },
+              {
+                "model": "ActiveHybrid 3",
+                "count": 3
+              },
+              {
+                "model": "M3",
+                "count": 586
+              },
+              {
+                "model": "M3 Cabriolet",
+                "count": 20
+              },
+              {
+                "model": "M340",
+                "count": 239
+              }
+            ]
+          },
+          {
+            "series": "4-Series",
+            "count": 1003,
+            "models": [
+              {
+                "model": "418",
+                "count": 0
+              },
+              {
+                "model": "418 Gran Coupé",
+                "count": 0
+              },
+              {
+                "model": "420",
+                "count": 58
+              },
+              {
+                "model": "420 Gran Coupé",
+                "count": 61
+              },
+              {
+                "model": "425",
+                "count": 1
+              },
+              {
+                "model": "428",
+                "count": 31
+              },
+              {
+                "model": "428 Gran Coupé",
+                "count": 9
+              },
+              {
+                "model": "430",
+                "count": 51
+              },
+              {
+                "model": "430 Cabriolet",
+                "count": 63
+              },
+              {
+                "model": "430 Gran Coupé",
+                "count": 70
+              },
+              {
+                "model": "435",
+                "count": 50
+              },
+              {
+                "model": "435 Gran Coupé",
+                "count": 29
+              },
+              {
+                "model": "440",
+                "count": 51
+              },
+              {
+                "model": "M4",
+                "count": 224
+              },
+              {
+                "model": "M4 Cabriolet",
+                "count": 86
+              },
+              {
+                "model": "M440",
+                "count": 219
+              }
+            ]
+          },
+          {
+            "series": "5-Series",
+            "count": 1754,
+            "models": [
+              {
+                "model": "518",
+                "count": 3
+              },
+              {
+                "model": "520",
+                "count": 530
+              },
+              {
+                "model": "520 Gran Turismo",
+                "count": 1
+              },
+              {
+                "model": "523",
+                "count": 21
+              },
+              {
+                "model": "524",
+                "count": 0
+              },
+              {
+                "model": "525",
+                "count": 85
+              },
+              {
+                "model": "528",
+                "count": 54
+              },
+              {
+                "model": "530",
+                "count": 258
+              },
+              {
+                "model": "530 Gran Turismo",
+                "count": 9
+              },
+              {
+                "model": "530e",
+                "count": 86
+              },
+              {
+                "model": "533",
+                "count": 0
+              },
+              {
+                "model": "535",
+                "count": 95
+              },
+              {
+                "model": "535 Gran Turismo",
+                "count": 9
+              },
+              {
+                "model": "540",
+                "count": 139
+              },
+              {
+                "model": "545",
+                "count": 3
+              },
+              {
+                "model": "545e",
+                "count": 13
+              },
+              {
+                "model": "550",
+                "count": 9
+              },
+              {
+                "model": "550 Gran Turismo",
+                "count": 2
+              },
+              {
+                "model": "550e",
+                "count": 47
+              },
+              {
+                "model": "560L",
+                "count": 0
+              },
+              {
+                "model": "ActiveHybrid 5",
+                "count": 3
+              },
+              {
+                "model": "M5",
+                "count": 300
+              },
+              {
+                "model": "M5 Gran Turismo",
+                "count": 0
+              },
+              {
+                "model": "M535",
+                "count": 2
+              },
+              {
+                "model": "M550",
+                "count": 85
+              }
+            ]
+          },
+          {
+            "series": "6-Series",
+            "count": 268,
+            "models": [
+              {
+                "model": "620 Gran Turismo",
+                "count": 0
+              },
+              {
+                "model": "628",
+                "count": 1
+              },
+              {
+                "model": "630",
+                "count": 17
+              },
+              {
+                "model": "630 Cabriolet",
+                "count": 0
+              },
+              {
+                "model": "633",
+                "count": 2
+              },
+              {
+                "model": "635",
+                "count": 21
+              },
+              {
+                "model": "635 Cabriolet",
+                "count": 0
+              },
+              {
+                "model": "640",
+                "count": 45
+              },
+              {
+                "model": "640 Cabriolet",
+                "count": 16
+              },
+              {
+                "model": "640 Grand Coupé",
+                "count": 0
+              },
+              {
+                "model": "645",
+                "count": 11
+              },
+              {
+                "model": "645 Cabriolet",
+                "count": 3
+              },
+              {
+                "model": "650",
+                "count": 68
+              },
+              {
+                "model": "650 Cabriolet",
+                "count": 11
+              },
+              {
+                "model": "650 Grand Coupé",
+                "count": 0
+              },
+              {
+                "model": "M6",
+                "count": 51
+              },
+              {
+                "model": "M6 Cabriolet",
+                "count": 22
+              },
+              {
+                "model": "M6 Grand Coupé",
+                "count": 0
+              }
+            ]
+          },
+          {
+            "series": "7-Series",
+            "count": 286,
+            "models": [
+              {
+                "model": "725",
+                "count": 0
+              },
+              {
+                "model": "728",
+                "count": 3
+              },
+              {
+                "model": "730",
+                "count": 76
+              },
+              {
+                "model": "730L",
+                "count": 16
+              },
+              {
+                "model": "732",
+                "count": 0
+              },
+              {
+                "model": "733",
+                "count": 0
+              },
+              {
+                "model": "735",
+                "count": 10
+              },
+              {
+                "model": "735L",
+                "count": 0
+              },
+              {
+                "model": "740",
+                "count": 60
+              },
+              {
+                "model": "740L",
+                "count": 4
+              },
+              {
+                "model": "745",
+                "count": 2
+              },
+              {
+                "model": "745e",
+                "count": 8
+              },
+              {
+                "model": "745L",
+                "count": 0
+              },
+              {
+                "model": "750",
+                "count": 71
+              },
+              {
+                "model": "750e",
+                "count": 3
+              },
+              {
+                "model": "750L",
+                "count": 29
+              },
+              {
+                "model": "760",
+                "count": 1
+              },
+              {
+                "model": "760L",
+                "count": 0
+              },
+              {
+                "model": "ActiveHybrid 7",
+                "count": 3
+              }
+            ]
+          },
+          {
+            "series": "8-Series",
+            "count": 71,
+            "models": [
+              {
+                "model": "830",
+                "count": 0
+              },
+              {
+                "model": "840",
+                "count": 62
+              },
+              {
+                "model": "850",
+                "count": 9
+              }
+            ]
+          },
+          {
+            "series": "M-Series",
+            "count": 354,
+            "models": [
+              {
+                "model": "M1",
+                "count": 3
+              },
+              {
+                "model": "M140",
+                "count": 51
+              },
+              {
+                "model": "M240",
+                "count": 139
+              },
+              {
+                "model": "M760",
+                "count": 13
+              },
+              {
+                "model": "M760e",
+                "count": 2
+              },
+              {
+                "model": "M8",
+                "count": 49
+              },
+              {
+                "model": "M850",
+                "count": 78
+              },
+              {
+                "model": "Z3 M",
+                "count": 4
+              },
+              {
+                "model": "Z4 M",
+                "count": 15
+              }
+            ]
+          },
+          {
+            "series": "X-Series",
+            "count": 6527,
+            "models": [
+              {
+                "model": "ActiveHybrid X6",
+                "count": 0
+              },
+              {
+                "model": "X1",
+                "count": 1623
+              },
+              {
+                "model": "X2",
+                "count": 404
+              },
+              {
+                "model": "X3",
+                "count": 1922
+              },
+              {
+                "model": "X4",
+                "count": 300
+              },
+              {
+                "model": "X5",
+                "count": 1513
+              },
+              {
+                "model": "X5 M",
+                "count": 108
+              },
+              {
+                "model": "X5 M50",
+                "count": 0
+              },
+              {
+                "model": "X6",
+                "count": 262
+              },
+              {
+                "model": "X6 M",
+                "count": 98
+              },
+              {
+                "model": "X6 M50",
+                "count": 71
+              },
+              {
+                "model": "X7",
+                "count": 140
+              },
+              {
+                "model": "XM",
+                "count": 86
+              }
+            ]
+          },
+          {
+            "series": "Z-Series",
+            "count": 290,
+            "models": [
+              {
+                "model": "Z1",
+                "count": 12
+              },
+              {
+                "model": "Z3",
+                "count": 90
+              },
+              {
+                "model": "Z4",
+                "count": 177
+              },
+              {
+                "model": "Z8",
+                "count": 11
+              }
+            ]
+          },
+          {
+            "series": "other",
+            "count": 1236,
+            "models": [
+              {
+                "model": "02",
+                "count": 0
+              },
+              {
+                "model": "1 ActiveE",
+                "count": 0
+              },
+              {
+                "model": "1500",
+                "count": 0
+              },
+              {
+                "model": "1502",
+                "count": 1
+              },
+              {
+                "model": "1600",
+                "count": 3
+              },
+              {
+                "model": "1600-2",
+                "count": 0
+              },
+              {
+                "model": "1602",
+                "count": 1
+              },
+              {
+                "model": "1800",
+                "count": 3
+              },
+              {
+                "model": "1802",
+                "count": 0
+              },
+              {
+                "model": "2000",
+                "count": 2
+              },
+              {
+                "model": "2000C/CS",
+                "count": 1
+              },
+              {
+                "model": "2002",
+                "count": 14
+              },
+              {
+                "model": "2500",
+                "count": 0
+              },
+              {
+                "model": "2800",
+                "count": 2
+              },
+              {
+                "model": "3.0CS",
+                "count": 0
+              },
+              {
+                "model": "3.0CSL",
+                "count": 3
+              },
+              {
+                "model": "3.0S",
+                "count": 0
+              },
+              {
+                "model": "3.0Si",
+                "count": 0
+              },
+              {
+                "model": "3.3L",
+                "count": 0
+              },
+              {
+                "model": "3.3Li",
+                "count": 0
+              },
+              {
+                "model": "3200 CS",
+                "count": 0
+              },
+              {
+                "model": "326",
+                "count": 0
+              },
+              {
+                "model": "327",
+                "count": 0
+              },
+              {
+                "model": "501",
+                "count": 2
+              },
+              {
+                "model": "502",
+                "count": 3
+              },
+              {
+                "model": "503",
+                "count": 0
+              },
+              {
+                "model": "507",
+                "count": 0
+              },
+              {
+                "model": "600",
+                "count": 0
+              },
+              {
+                "model": "700",
+                "count": 1
+              },
+              {
+                "model": "767",
+                "count": 0
+              },
+              {
+                "model": "E9",
+                "count": 0
+              },
+              {
+                "model": "i3",
+                "count": 132
+              },
+              {
+                "model": "i4",
+                "count": 225
+              },
+              {
+                "model": "i5",
+                "count": 110
+              },
+              {
+                "model": "i7",
+                "count": 14
+              },
+              {
+                "model": "i8",
+                "count": 28
+              },
+              {
+                "model": "Isetta",
+                "count": 0
+              },
+              {
+                "model": "Isetta 250",
+                "count": 0
+              },
+              {
+                "model": "Isetta 300",
+                "count": 1
+              },
+              {
+                "model": "iX",
+                "count": 223
+              },
+              {
+                "model": "iX1",
+                "count": 207
+              },
+              {
+                "model": "iX2",
+                "count": 82
+              },
+              {
+                "model": "iX3",
+                "count": 143
+              },
+              {
+                "model": "M635",
+                "count": 0
+              },
+              {
+                "model": "New Class",
+                "count": 0
+              },
+              {
+                "model": "New Six",
+                "count": 0
+              },
+              {
+                "model": "X3 M",
+                "count": 28
+              },
+              {
+                "model": "X4 M",
+                "count": 7
+              }
+            ]
+          }
+        ],
+        "popularModels": [
+          {
+            "model": "X3",
+            "count": 1922
+          },
+          {
+            "model": "X1",
+            "count": 1623
+          },
+          {
+            "model": "X5",
+            "count": 1513
+          },
+          {
+            "model": "320",
+            "count": 720
+          },
+          {
+            "model": "M3",
+            "count": 586
+          }
+        ]
+      },
+      {
+        "brand": "Tesla",
+        "count": 663,
+        "allSeriesAndModels": [
+          {
+            "series": "other",
+            "count": 663,
+            "models": [
+              {
+                "model": "Cybertruck",
+                "count": 0
+              },
+              {
+                "model": "Model 3",
+                "count": 211
+              },
+              {
+                "model": "Model S",
+                "count": 144
+              },
+              {
+                "model": "Model X",
+                "count": 104
+              },
+              {
+                "model": "Model Y",
+                "count": 200
+              },
+              {
+                "model": "Roadster",
+                "count": 4
+              }
+            ]
+          }
+        ],
+        "popularModels": [
+          {
+            "model": "Model 3",
+            "count": 211
+          },
+          {
+            "model": "Model Y",
+            "count": 200
+          },
+          {
+            "model": "Model S",
+            "count": 144
+          },
+          {
+            "model": "Model X",
+            "count": 104
+          },
+          {
+            "model": "Roadster",
+            "count": 4
+          }
+        ]
+      },
+      {
+        "brand": "VW",
+        "count": 20659,
+        "allSeriesAndModels": [
+          {
+            "series": "Beetle Series",
+            "count": 138,
+            "models": [
+              {
+                "model": "Beetle",
+                "count": 66
+              },
+              {
+                "model": "Beetle Cabriolet",
+                "count": 8
+              },
+              {
+                "model": "Buggy",
+                "count": 7
+              },
+              {
+                "model": "Käfer",
+                "count": 53
+              },
+              {
+                "model": "New Beetle",
+                "count": 4
+              },
+              {
+                "model": "New Beetle Cabriolet",
+                "count": 0
+              }
+            ]
+          },
+          {
+            "series": "Caddy Series",
+            "count": 1155,
+            "models": [
+              {
+                "model": "Caddy",
+                "count": 967
+              },
+              {
+                "model": "Caddy Maxi",
+                "count": 187
+              },
+              {
+                "model": "Caddy Maxi Life",
+                "count": 1
+              }
+            ]
+          },
+          {
+            "series": "Golf Series",
+            "count": 4530,
+            "models": [
+              {
+                "model": "e-Golf",
+                "count": 15
+              },
+              {
+                "model": "Golf",
+                "count": 17
+              },
+              {
+                "model": "Golf Alltrack",
+                "count": 34
+              },
+              {
+                "model": "Golf Cabriolet",
+                "count": 82
+              },
+              {
+                "model": "Golf Country",
+                "count": 3
+              },
+              {
+                "model": "Golf I",
+                "count": 14
+              },
+              {
+                "model": "Golf II",
+                "count": 85
+              },
+              {
+                "model": "Golf III",
+                "count": 123
+              },
+              {
+                "model": "Golf IV",
+                "count": 222
+              },
+              {
+                "model": "Golf Plus",
+                "count": 0
+              },
+              {
+                "model": "Golf Plus Cross",
+                "count": 76
+              },
+              {
+                "model": "Golf Sportsvan",
+                "count": 25
+              },
+              {
+                "model": "Golf V",
+                "count": 74
+              },
+              {
+                "model": "Golf VI",
+                "count": 335
+              },
+              {
+                "model": "Golf VII",
+                "count": 1228
+              },
+              {
+                "model": "Golf VIII",
+                "count": 2197
+              }
+            ]
+          },
+          {
+            "series": "ID Series",
+            "count": 1535,
+            "models": [
+              {
+                "model": "ID. Buzz",
+                "count": 296
+              },
+              {
+                "model": "ID.3",
+                "count": 485
+              },
+              {
+                "model": "ID.4",
+                "count": 367
+              },
+              {
+                "model": "ID.5",
+                "count": 156
+              },
+              {
+                "model": "ID.7",
+                "count": 231
+              }
+            ]
+          },
+          {
+            "series": "Passat Series",
+            "count": 1147,
+            "models": [
+              {
+                "model": "CC",
+                "count": 8
+              },
+              {
+                "model": "Passat",
+                "count": 1114
+              },
+              {
+                "model": "Passat Alltrack",
+                "count": 25
+              }
+            ]
+          },
+          {
+            "series": "Transporter Series",
+            "count": 1024,
+            "models": [
+              {
+                "model": "T1",
+                "count": 19
+              },
+              {
+                "model": "T2",
+                "count": 18
+              },
+              {
+                "model": "T3",
+                "count": 37
+              },
+              {
+                "model": "T4",
+                "count": 62
+              },
+              {
+                "model": "T5",
+                "count": 106
+              },
+              {
+                "model": "T6",
+                "count": 120
+              },
+              {
+                "model": "T6.1",
+                "count": 307
+              },
+              {
+                "model": "T7",
+                "count": 355
+              }
+            ]
+          },
+          {
+            "series": "Up Series",
+            "count": 125,
+            "models": [
+              {
+                "model": "cross up!",
+                "count": 2
+              },
+              {
+                "model": "e-up!",
+                "count": 31
+              },
+              {
+                "model": "up!",
+                "count": 92
+              }
+            ]
+          },
+          {
+            "series": "other",
+            "count": 11005,
+            "models": [
+              {
+                "model": "181",
+                "count": 7
+              },
+              {
+                "model": "Amarok",
+                "count": 180
+              },
+              {
+                "model": "Arteon",
+                "count": 69
+              },
+              {
+                "model": "Atlas",
+                "count": 6
+              },
+              {
+                "model": "Atlas Cross Sport",
+                "count": 0
+              },
+              {
+                "model": "Bora",
+                "count": 13
+              },
+              {
+                "model": "California",
+                "count": 483
+              },
+              {
+                "model": "Caravelle",
+                "count": 246
+              },
+              {
+                "model": "Corrado",
+                "count": 18
+              },
+              {
+                "model": "Crafter",
+                "count": 324
+              },
+              {
+                "model": "Derby",
+                "count": 0
+              },
+              {
+                "model": "e-Crafter",
+                "count": 2
+              },
+              {
+                "model": "Eos",
+                "count": 52
+              },
+              {
+                "model": "Fox",
+                "count": 27
+              },
+              {
+                "model": "Iltis",
+                "count": 1
+              },
+              {
+                "model": "Jetta",
+                "count": 23
+              },
+              {
+                "model": "K70",
+                "count": 0
+              },
+              {
+                "model": "Karmann Ghia",
+                "count": 12
+              },
+              {
+                "model": "Lavida",
+                "count": 0
+              },
+              {
+                "model": "LT",
+                "count": 4
+              },
+              {
+                "model": "Lupo",
+                "count": 8
+              },
+              {
+                "model": "Multivan",
+                "count": 596
+              },
+              {
+                "model": "Phaeton",
+                "count": 11
+              },
+              {
+                "model": "Pointer",
+                "count": 0
+              },
+              {
+                "model": "Polo",
+                "count": 1896
+              },
+              {
+                "model": "Polo Cross",
+                "count": 8
+              },
+              {
+                "model": "Routan",
+                "count": 1
+              },
+              {
+                "model": "Santana",
+                "count": 0
+              },
+              {
+                "model": "Scirocco",
+                "count": 71
+              },
+              {
+                "model": "Sharan",
+                "count": 314
+              },
+              {
+                "model": "Shuttle",
+                "count": 0
+              },
+              {
+                "model": "T-Cross",
+                "count": 485
+              },
+              {
+                "model": "T-Roc",
+                "count": 1062
+              },
+              {
+                "model": "T-Roc Cabriolet",
+                "count": 85
+              },
+              {
+                "model": "Taigo",
+                "count": 367
+              },
+              {
+                "model": "Taos",
+                "count": 0
+              },
+              {
+                "model": "Taro",
+                "count": 0
+              },
+              {
+                "model": "Tayron",
+                "count": 471
+              },
+              {
+                "model": "Tera",
+                "count": 0
+              },
+              {
+                "model": "Tiguan",
+                "count": 2596
+              },
+              {
+                "model": "Tiguan Allspace",
+                "count": 227
+              },
+              {
+                "model": "Touareg",
+                "count": 466
+              },
+              {
+                "model": "Touran",
+                "count": 847
+              },
+              {
+                "model": "Touran Cross",
+                "count": 19
+              },
+              {
+                "model": "Type 3",
+                "count": 7
+              },
+              {
+                "model": "Vento",
+                "count": 1
+              },
+              {
+                "model": "W12",
+                "count": 0
+              },
+              {
+                "model": "XL1",
+                "count": 0
+              }
+            ]
+          }
+        ],
+        "popularModels": [
+          {
+            "model": "Tiguan",
+            "count": 2596
+          },
+          {
+            "model": "Golf VIII",
+            "count": 2197
+          },
+          {
+            "model": "Polo",
+            "count": 1896
+          },
+          {
+            "model": "Golf VII",
+            "count": 1228
+          },
+          {
+            "model": "Passat",
+            "count": 1114
+          }
+        ]
+      }
+    ],
+    "popularBrands": [
+      {
+        "brand": "VW",
+        "count": 20776
+      },
+      {
+        "brand": "BMW",
+        "count": 17852
+      },
+      {
+        "brand": "Audi",
+        "count": 16473
+      }
+    ]
+  },
+  "fuel": [
+    "El",
+    "El_Hybrid",
+    "Benzin",
+    "Diesel",
+    "CNG_Hybrid",
+    "LPG_Hybrid",
+    "Ethanol_Benzin",
+    "Hydrogen"
+  ],
+  "priceRange": {
+    "startOptions": [
+      200,
+      1000,
+      2000,
+      3000,
+      4000,
+      5000,
+      6000,
+      7000,
+      8000,
+      9000,
+      10000,
+      12500,
+      15000,
+      17500,
+      20000,
+      25000,
+      30000,
+      35000,
+      40000,
+      45000,
+      50000,
+      60000,
+      70000,
+      80000,
+      90000,
+      100000
+    ],
+    "endOptions": [
+      10000000,
+      2000000,
+      90000,
+      80000,
+      70000,
+      60000,
+      50000,
+      45000,
+      40000,
+      35000,
+      30000,
+      25000,
+      20000,
+      17500,
+      15000,
+      12500,
+      10000,
+      9000,
+      8000,
+      7000,
+      6000,
+      5000,
+      4000,
+      3000,
+      2000,
+      1000
+    ]
+  },
+  "kmRange": {
+    "startOptions": [
+      0,
+      10000,
+      25000,
+      50000,
+      75000,
+      100000,
+      150000,
+      200000,
+      300000,
+      400000
+    ],
+    "endOptions": [
+      0,
+      400000,
+      300000,
+      200000,
+      150000,
+      100000,
+      75000,
+      50000,
+      25000,
+      10000
+    ]
+  },
+  "yearRange": {
+    "startOptions": [
+      1950,
+      1955,
+      1960,
+      1965,
+      1970,
+      1975,
+      1980,
+      1985,
+      1990,
+      1991,
+      1992,
+      1993,
+      1994,
+      1995,
+      1996,
+      1997,
+      1998,
+      1999,
+      2000,
+      2001,
+      2002,
+      2003,
+      2004,
+      2005,
+      2006,
+      2007,
+      2008,
+      2009,
+      2010,
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "endOptions": [
+      2026,
+      2025,
+      2024,
+      2023,
+      2022,
+      2021,
+      2020,
+      2019,
+      2018,
+      2017,
+      2016,
+      2015,
+      2014,
+      2013,
+      2012,
+      2011,
+      2010,
+      2009,
+      2008,
+      2007,
+      2006,
+      2005,
+      2004,
+      2003,
+      2002,
+      2001,
+      2000,
+      1999,
+      1998,
+      1997,
+      1996,
+      1995,
+      1994,
+      1993,
+      1992,
+      1991,
+      1990,
+      1985,
+      1980,
+      1975,
+      1970,
+      1965,
+      1960,
+      1955,
+      1950
+    ]
+  }
+}
