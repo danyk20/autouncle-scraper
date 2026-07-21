@@ -29,6 +29,13 @@ class TestScalarize:
         result = au._scalarize([{"name": "x"}, {"name": "y"}])
         assert result == "x; y"
 
+    def test_unrecognized_type_falls_back_to_str(self):
+        class Weird:
+            def __str__(self):
+                return "weird-value"
+
+        assert au._scalarize(Weird()) == "weird-value"
+
 
 class TestFlattenListing:
     def test_plain_scalars_pass_through(self):

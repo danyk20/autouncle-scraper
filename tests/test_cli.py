@@ -194,6 +194,13 @@ class TestRunCli:
         )
         assert au.run_cli(["--make", "VW", "--model", "Golf", "--delay", "0"]) == 1
 
+    def test_keyboard_interrupt_returns_130(self, monkeypatch):
+        def raise_interrupt(argv=None):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(au, "main", raise_interrupt)
+        assert au.run_cli(["--make", "VW", "--model", "Golf"]) == 130
+
 
 class TestMainEntryPoint:
     def test_dunder_main_guard_calls_run_cli(self):

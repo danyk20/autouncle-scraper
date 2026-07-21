@@ -152,3 +152,40 @@ def test_listing_id_from_iri():
         "6690428"
     )
     assert au._listing_id_from_iri("https://example.com/no-id-here") is None
+
+
+class TestToInt:
+    def test_none_returns_none(self):
+        assert au._to_int(None) is None
+
+    def test_valid_values_convert(self):
+        assert au._to_int("2011") == 2011
+        assert au._to_int(2011) == 2011
+
+    def test_unconvertible_value_returns_none(self):
+        assert au._to_int("not-a-year") is None
+        assert au._to_int(object()) is None
+
+
+class TestSearchListingsSafetyNet:
+    @responses.activate
+    def test_stops_early_when_a_later_page_yields_no_new_listings(self, no_sleep):
+        """A live inventory can shift between requests; if page 2 reports
+        more pages remain but yields zero new ids, stop rather than loop
+        forever re-fetching the same (or an emptied) page."""
+        page1 = load_fixture("search_vw_golf_alltrack_page1.html")
+        responses.add(
+            responses.GET, "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf%20Alltrack", body=page1, status=200
+        )
+        # Page 2 duplicates page 1's own items instead of the real remainder,
+        # simulating an inventory shift: no *new* ids on this "page".
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf%20Alltrack?page=2",
+            body=page1,
+            status=200,
+        )
+        session = au.make_session()
+        listings = au.search_listings("VW", "Golf Alltrack", DOMAIN_CFG, session=session)
+        assert len(listings) == 25
+        assert len(responses.calls) == 2

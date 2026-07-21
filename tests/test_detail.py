@@ -167,6 +167,12 @@ class TestExtractGalleryImages:
         html = '<img alt="x"><img src="not-a-car-image-url">'
         assert au.extract_gallery_images(html) == []
 
+    def test_ignores_car_images_src_with_unexpected_filename_shape(self):
+        # Contains "car_images" but doesn't match the full URL pattern
+        # (e.g. missing a file extension) - should be skipped, not crash.
+        html = '<img src="https://images.autouncle.com/ch/car_images/no-extension-here">'
+        assert au.extract_gallery_images(html) == []
+
 
 class TestExtractEquipment:
     def test_extracts_real_fixture_equipment(self):
@@ -184,6 +190,14 @@ class TestExtractEquipment:
 
     def test_ignores_lists_with_wrong_child_count(self):
         html = "<ul><li><span>only-one-child</span></li></ul>"
+        assert au.extract_equipment(html) == {}
+
+    def test_ignores_empty_ul_with_no_li_children(self):
+        html = "<ul></ul><ul><li><span>Klimaanlage</span><span>Ja</span></li></ul>"
+        assert au.extract_equipment(html) == {"Klimaanlage": "Ja"}
+
+    def test_ignores_li_with_empty_label(self):
+        html = "<ul><li><span></span><span>value</span></li></ul>"
         assert au.extract_equipment(html) == {}
 
     def test_empty_page_returns_empty_dict(self):
