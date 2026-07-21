@@ -101,10 +101,14 @@ This module can be used two ways:
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
@@ -274,3 +278,235 @@ def resolve_model_key(make_key: str, model_query: str, config: dict[str, Any]) -
         return matches[0]
     available = ", ".join(sorted(models))
     raise ValueError(f"Could not find a model matching {model_query!r} for brand {make_key!r}. Available: {available}")
+
+
+# ============================================================
+# JSON-LD extraction (shared by search-result and detail pages)
+# ============================================================
+
+_LDJSON_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+_LISTING_ID_RE = re.compile(r"/d/(\d+)-")
+
+
+def _graph_items(html: str) -> list[dict[str, Any]]:
+    """Parse every <script type="application/ld+json"> block on the page and
+    return the merged @graph array. AutoUncle emits exactly one such block
+    per page as of this writing, but merging is harmless if that changes."""
+    items: list[dict[str, Any]] = []
+    for match in _LDJSON_RE.finditer(html):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            logger.warning("Skipping unparseable JSON-LD block")
+            continue
+        items.extend(data.get("@graph", []))
+    return items
+
+
+def _has_type(node: dict[str, Any], type_name: str) -> bool:
+    t = node.get("@type")
+    if isinstance(t, list):
+        return type_name in t
+    return bool(t == type_name)
+
+
+def find_item_list(graph_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((g for g in graph_items if _has_type(g, "ItemList")), None)
+
+
+def find_vehicle(graph_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((g for g in graph_items if _has_type(g, "Vehicle")), None)
+
+
+def find_dataset(graph_items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next((g for g in graph_items if _has_type(g, "Dataset")), None)
+
+
+def _listing_id_from_iri(iri: str) -> str | None:
+    m = _LISTING_ID_RE.search(iri)
+    return m.group(1) if m else None
+
+
+# German-locale additionalProperty labels AutoUncle renders on its de-ch
+# site, mapped to stable, English field names. Anything not in this table
+# is kept verbatim under "otherProperties" rather than silently dropped -
+# AutoUncle doesn't publish a fixed schema for these, so treat this list as
+# "known so far", not exhaustive.
+ADDITIONAL_PROPERTY_LABELS = {
+    "Kraftstoffverbrauch": "fuelConsumptionLabel",
+    "CO2-Emissionen": "co2EmissionsLabel",
+    "Preisbewertung": "priceRatingLabel",
+    "Ersparnis ggü. Marktpreis": "savingsVsMarketChf",
+    "Tage auf dem Markt": "daysOnMarket",
+}
+
+
+def _parse_additional_properties(props: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    other: list[dict[str, Any]] = []
+    for p in props:
+        name = p.get("name")
+        value = p.get("value")
+        if isinstance(value, dict):
+            value = value.get("value")
+        key = ADDITIONAL_PROPERTY_LABELS.get(name) if isinstance(name, str) else None
+        if key:
+            result[key] = value
+        else:
+            other.append({"name": name, "value": value})
+    if other:
+        result["otherProperties"] = other
+    return result
+
+
+def parse_vehicle_jsonld(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a schema.org Product+Vehicle JSON-LD object (from either a
+    search-result ItemList entry or a detail page) into a flat-ish dict of
+    stable field names. Both shapes are the same schema, just with fewer
+    fields populated in the search-result case (e.g. no full address, no
+    additionalProperty) - so one parser covers both, and simply omits (as
+    None/[]) whatever the source didn't provide."""
+    engine = item.get("vehicleEngine", {}) or {}
+    displacement = engine.get("engineDisplacement", {}) or {}
+    power = engine.get("enginePower", {}) or {}
+    power_kw_prop = power.get("additionalProperty", {}) or {}
+    mileage = item.get("mileageFromOdometer", {}) or {}
+    fuel_consumption = item.get("fuelConsumption", {}) or {}
+    offers = item.get("offers", {}) or {}
+    address = (offers.get("availableAtOrFrom", {}) or {}).get("address", {}) or {}
+    brand = item.get("brand", {}) or {}
+    image = item.get("image", {}) or {}
+
+    listing_id = _listing_id_from_iri(item.get("@id", "")) or _listing_id_from_iri(
+        (item.get("mainEntityOfPage", {}) or {}).get("@id", "")
+    )
+
+    parsed: dict[str, Any] = {
+        "id": listing_id,
+        "name": item.get("name"),
+        "description": item.get("description"),
+        "color": item.get("color") or None,
+        "make": brand.get("name"),
+        "model": item.get("model"),
+        "year": _to_int(item.get("vehicleModelDate")),
+        "transmission": item.get("vehicleTransmission"),
+        "numberOfDoors": _to_int(item.get("numberOfDoors")),
+        "bodyType": item.get("bodyType"),
+        "fuelType": item.get("fuelType"),
+        "engineDisplacementL": displacement.get("value"),
+        "enginePowerPs": power.get("value"),
+        "enginePowerKw": power_kw_prop.get("value") if power_kw_prop.get("name") == "kilowatt" else None,
+        "mileageKm": _to_int(mileage.get("value")),
+        "fuelConsumptionL100km": fuel_consumption.get("value"),
+        "co2GKm": item.get("emissionsCO2"),
+        "price": offers.get("price"),
+        "priceCurrency": offers.get("priceCurrency"),
+        "itemCondition": offers.get("itemCondition"),
+        "availability": offers.get("availability"),
+        "addressCountry": address.get("addressCountry"),
+        "addressLocality": address.get("addressLocality"),
+        "addressRegion": address.get("addressRegion"),
+        "postalCode": address.get("postalCode"),
+        "imageUrl": image.get("url"),
+        # "url" is deliberately not set here - this parser is domain-agnostic
+        # (it doesn't know the host/locale), so callers (search_listings(),
+        # fetch_detail()) set the correct fully-qualified URL themselves.
+    }
+    parsed.update(_parse_additional_properties(item.get("additionalProperty", []) or []))
+    return parsed
+
+
+def _to_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# ============================================================
+# Unfiltered search (JSON-LD + pagination)
+# ============================================================
+
+
+def build_search_url(domain_cfg: DomainConfig, make_key: str, model_key: str, page: int = 1) -> str:
+    path = "/".join(quote(seg, safe="") for seg in (domain_cfg.locale, domain_cfg.cars_path, make_key, model_key))
+    url = f"https://{domain_cfg.host}/{path}"
+    if page > 1:
+        url += f"?page={page}"
+    return url
+
+
+def search_listings(
+    make_key: str,
+    model_key: str,
+    domain_cfg: DomainConfig,
+    *,
+    session: requests.Session,
+    delay: float = 0.4,
+    verbose: bool = True,
+) -> list[dict[str, Any]]:
+    """Fetch every listing for a make/model via the canonical (unfiltered)
+    search-result pages' JSON-LD, paginating until numberOfItems is fully
+    collected. Each returned dict is a parse_vehicle_jsonld() summary record
+    (already fairly rich - price, mileage, year, engine, fuel, transmission,
+    body type - though not as complete as a detail-page visit)."""
+    listings: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    page = 1
+    total_pages = 1
+    total_elements: int | None = None
+    page_size: int | None = None  # derived once, from page 1 - later pages are shorter (the remainder)
+
+    while page <= total_pages:
+        url = build_search_url(domain_cfg, make_key, model_key, page=page)
+        resp = request_with_retries(session, "GET", url)
+        graph = _graph_items(resp.text)
+        item_list = find_item_list(graph)
+        if item_list is None:
+            if page == 1:
+                logger.warning("No ItemList found on %s; assuming zero results", url)
+            break
+
+        total_elements = item_list.get("numberOfItems", total_elements)
+        items = item_list.get("itemListElement", [])
+        if page_size is None:
+            page_size = len(items) or 25
+        if total_elements is not None:
+            total_pages = max(1, -(-total_elements // page_size))  # ceil division
+
+        new_count = 0
+        for element in items:
+            vehicle = parse_vehicle_jsonld(element.get("item", {}))
+            listing_id = vehicle.get("id")
+            if listing_id and listing_id not in seen_ids:
+                seen_ids.add(listing_id)
+                vehicle["url"] = f"https://{domain_cfg.host}/{domain_cfg.locale}/d/{listing_id}"
+                listings.append(vehicle)
+                new_count += 1
+
+        if verbose:
+            logger.info(
+                "  page %d/%d: %d listings (%d new, %d total so far)",
+                page,
+                total_pages,
+                len(items),
+                new_count,
+                len(listings),
+            )
+
+        if new_count == 0 and page > 1:
+            # A live inventory can shift between requests; stop rather than
+            # loop forever if a later page unexpectedly yields nothing new.
+            logger.warning("Page %d yielded no new listings; stopping early", page)
+            break
+
+        page += 1
+        if page <= total_pages:
+            time.sleep(delay)
+
+    if verbose and total_elements is not None:
+        logger.info("  site reports %d total matches; collected %d unique listings", total_elements, len(listings))
+
+    return listings
