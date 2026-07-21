@@ -1,0 +1,30 @@
+name: E2E
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, Monday 06:00 UTC - catches drift between AutoUncle's live
+    # markup/API shape and this scraper's fixtures/regexes early, without
+    # gating every PR on the live site's availability.
+    - cron: "0 6 * * 1"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true # live-site scraping is inherently flaky; never block merges on it
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "requests~=2.34" "beautifulsoup4~=4.12" \
+                      "pytest~=9.1" "pytest-cov~=7.1" "responses~=0.26"
+
+      - name: End-to-end tests against the live site
+        run: pytest -m e2e --no-cov
