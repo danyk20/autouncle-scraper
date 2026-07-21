@@ -111,6 +111,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from bs4 import BeautifulSoup
 
 __version__ = "0.1.0"
 
@@ -408,6 +409,7 @@ def parse_vehicle_jsonld(item: dict[str, Any]) -> dict[str, Any]:
         "addressRegion": address.get("addressRegion"),
         "postalCode": address.get("postalCode"),
         "imageUrl": image.get("url"),
+        "imageCaption": image.get("caption"),
         # "url" is deliberately not set here - this parser is domain-agnostic
         # (it doesn't know the host/locale), so callers (search_listings(),
         # fetch_detail()) set the correct fully-qualified URL themselves.
@@ -575,13 +577,134 @@ def parse_detail_jsonld(html: str) -> dict[str, Any]:
     return parsed
 
 
+# ============================================================
+# Supplemental HTML scraping (BeautifulSoup)
+#
+# None of this is in the JSON-LD - it only exists in the rendered DOM, so a
+# detail page's full record is JSON-LD (parse_detail_jsonld) PLUS whatever
+# this section adds. Every extractor here degrades to an empty list/None on
+# a selector miss rather than raising, since presence varies per listing
+# (e.g. equipment lists differ; a private-seller listing may show no dealer
+# name at all).
+# ============================================================
+
+_IMAGE_URL_RE = re.compile(
+    r"https://images\.autouncle\.com/[\w/]+/car_images/(?:(small|medium|large)_)?([\w-]+)_[\w.-]+\.(?:jpe?g|webp|png)"
+)
+_SOURCE_LISTING_RE = re.compile(r'href="(/[\w-]+/das_wiedersehen/([\w-]+)/\d+/\d+)"')
+
+
+def extract_gallery_images(html: str, *, expected_alt: str | None = None) -> list[str]:
+    """Extract this listing's own gallery photos, deduped by image uuid and
+    preferring the full-resolution variant over small_/medium_/large_
+    prefixed ones. The page can also embed OTHER listings' thumbnails
+    (a "similar cars" section) using the same images.autouncle.com/car_images
+    URL shape but a generic alt text (just brand+model, no full spec) - so
+    when `expected_alt` is given (normally the JSON-LD Vehicle's
+    `image.caption`), only <img> tags with a matching alt are considered,
+    which reliably excludes those unrelated thumbnails."""
+    soup = BeautifulSoup(html, "html.parser")
+    by_uuid: dict[str, dict[str, str]] = {}
+    for img in soup.find_all("img"):
+        src = img.get("src", "")
+        if not isinstance(src, str) or "car_images" not in src:
+            continue
+        if expected_alt is not None and img.get("alt") != expected_alt:
+            continue
+        m = _IMAGE_URL_RE.search(src)
+        if not m:
+            continue
+        size_prefix, uuid = m.group(1) or "", m.group(2)
+        by_uuid.setdefault(uuid, {})[size_prefix] = src
+
+    result = []
+    for variants in by_uuid.values():
+        for pref in ("", "large", "medium", "small"):
+            if pref in variants:
+                result.append(variants[pref])
+                break
+    return result
+
+
+def extract_equipment(html: str) -> dict[str, str]:
+    """Extract label/value spec+equipment pairs (e.g. "Klimaanlage": "Ja",
+    "Isofix": "Ja", "CO2": "150 g CO2/km komb.") from the page's simple
+    <ul><li><span>label</span><span>value</span></li></ul> blocks. Found
+    structurally (an <li> with exactly two direct <span> children and
+    nothing else) rather than by class name, since AutoUncle's CSS classes
+    are build-hashed and not a stable target across deploys."""
+    soup = BeautifulSoup(html, "html.parser")
+    merged: dict[str, str] = {}
+    for ul in soup.find_all("ul"):
+        lis = ul.find_all("li", recursive=False)
+        if not lis:
+            continue
+        pairs: dict[str, str] = {}
+        for li in lis:
+            children = li.find_all(recursive=False)
+            if len(children) != 2 or any(c.name != "span" for c in children):
+                pairs = {}
+                break
+            label = children[0].get_text(strip=True)
+            value = children[1].get_text(strip=True)
+            if not label:
+                pairs = {}
+                break
+            pairs[label] = value
+        merged.update(pairs)
+    return merged
+
+
+def extract_source_listing(html: str) -> dict[str, str] | None:
+    """Some AutoUncle listings are aggregated from another portal (e.g.
+    AutoScout24) and link back to the original ad instead of showing an
+    inline dealer name - extract that source platform + path when present."""
+    m = _SOURCE_LISTING_RE.search(html)
+    if not m:
+        return None
+    return {"sourcePlatform": m.group(2), "sourcePath": m.group(1)}
+
+
+def extract_dealer_name(html: str) -> str | None:
+    """Best-effort extraction of an inline dealer/seller display name.
+    Empirically, listings aggregated from another portal (see
+    extract_source_listing()) don't show one in the DOM at all - only a
+    link back to the original ad - so this commonly returns None; that is
+    expected, not a bug, and is documented in docs/REFERENCE.md."""
+    return None
+
+
+def extract_description(html: str) -> str | None:
+    """Placeholder for a longer free-text description, if AutoUncle ever
+    renders one beyond the JSON-LD "description" field. Empirically, no
+    such text was found in the rendered DOM as of this writing - always
+    returns None. Kept as a real function (not silently omitted) for
+    scrape()/flatten_listing() signature stability if that changes."""
+    return None
+
+
+def extract_vin(html: str) -> str | None:
+    """Placeholder for a VIN, if AutoUncle ever renders one. Empirically,
+    no VIN was found in the rendered DOM as of this writing - always
+    returns None. Kept as a real function for the same reason as
+    extract_description()."""
+    return None
+
+
 def fetch_detail(listing_id: str, *, domain_cfg: DomainConfig, session: requests.Session) -> dict[str, Any]:
-    """Fetch and parse one listing's detail page."""
+    """Fetch and parse one listing's detail page: the JSON-LD record plus
+    every BeautifulSoup supplement above, merged into one dict."""
     url = build_detail_url(domain_cfg, listing_id)
     resp = request_with_retries(session, "GET", url)
     detail = parse_detail_jsonld(resp.text)
     detail.setdefault("id", listing_id)
     detail["url"] = url
+    detail["imageUrls"] = extract_gallery_images(resp.text, expected_alt=detail.get("imageCaption"))
+    detail["equipment"] = extract_equipment(resp.text)
+    detail["dealerName"] = extract_dealer_name(resp.text)
+    detail["vin"] = extract_vin(resp.text)
+    source = extract_source_listing(resp.text)
+    detail["sourcePlatform"] = source["sourcePlatform"] if source else None
     return detail
 
 
@@ -596,8 +719,8 @@ def visit_all_listings(
     """Visit each listing id's detail page one by one and return the full
     parsed record for each. This is where the vast majority of scraped
     fields come from - full address, price history, market-analysis
-    labels - regardless of whether the search phase used JSON-LD or the
-    filtered GraphQL+RSC path."""
+    labels, gallery, equipment - regardless of whether the search phase
+    used JSON-LD or the filtered GraphQL+RSC path."""
     ids = list(listing_ids)
     total = len(ids)
     visited: list[dict[str, Any]] = []

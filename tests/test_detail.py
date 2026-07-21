@@ -105,6 +105,20 @@ class TestFetchDetail:
         assert detail["url"] == "https://www.autouncle.ch/de-ch/d/6690428"
         assert detail["price"] == 5500
 
+    @responses.activate
+    def test_merges_beautifulsoup_supplement(self):
+        html = load_fixture("detail_6690428.html")
+        responses.add(responses.GET, "https://www.autouncle.ch/de-ch/d/6690428", body=html, status=200)
+
+        session = au.make_session()
+        detail = au.fetch_detail("6690428", domain_cfg=DOMAIN_CFG, session=session)
+
+        assert len(detail["imageUrls"]) == 4
+        assert detail["equipment"]["Klimaanlage"] == "Ja"
+        assert detail["sourcePlatform"] == "autoscout24-ch"
+        assert detail["dealerName"] is None
+        assert detail["vin"] is None
+
 
 class TestVisitAllListings:
     @responses.activate
@@ -123,3 +137,78 @@ class TestVisitAllListings:
     def test_empty_input_returns_empty(self, no_sleep):
         session = au.make_session()
         assert au.visit_all_listings([], domain_cfg=DOMAIN_CFG, session=session) == []
+
+
+class TestExtractGalleryImages:
+    def test_extracts_own_photos_only_by_matching_alt(self):
+        html = load_fixture("detail_6690428.html")
+        parsed = au.parse_detail_jsonld(html)
+        images = au.extract_gallery_images(html, expected_alt=parsed["imageCaption"])
+
+        # 4 unique uuids belong to this listing; a handful of "medium_"
+        # thumbnails elsewhere on the page belong to OTHER listings (a
+        # "similar cars" section) and must be excluded via the alt-text match.
+        assert len(images) == 4
+        assert all("car_images" in u for u in images)
+        # Full-resolution (no size prefix) preferred over the small_ variant.
+        assert all("/small_" not in u for u in images)
+
+    def test_without_expected_alt_includes_everything_on_page(self):
+        html = load_fixture("detail_6690428.html")
+        images_scoped = au.extract_gallery_images(html, expected_alt="Gebraucht VW Golf 160 PS (117 kW) 2011 Cabrio")
+        images_unscoped = au.extract_gallery_images(html)
+        assert len(images_unscoped) > len(images_scoped)
+
+    def test_no_images_on_page_returns_empty(self):
+        assert au.extract_gallery_images("<html><body>no photos</body></html>") == []
+
+    def test_ignores_non_string_src(self):
+        # A malformed/missing src attribute shouldn't crash extraction.
+        html = '<img alt="x"><img src="not-a-car-image-url">'
+        assert au.extract_gallery_images(html) == []
+
+
+class TestExtractEquipment:
+    def test_extracts_real_fixture_equipment(self):
+        html = load_fixture("detail_6690428.html")
+        equipment = au.extract_equipment(html)
+
+        assert equipment["Klimaanlage"] == "Ja"
+        assert equipment["Isofix"] == "Ja"
+        assert equipment["Türen"] == "2"
+        assert equipment["Karosserie"] == "Cabrio"
+
+    def test_ignores_lists_with_non_span_children(self):
+        html = "<ul><li><div>not a span</div><span>value</span></li></ul>"
+        assert au.extract_equipment(html) == {}
+
+    def test_ignores_lists_with_wrong_child_count(self):
+        html = "<ul><li><span>only-one-child</span></li></ul>"
+        assert au.extract_equipment(html) == {}
+
+    def test_empty_page_returns_empty_dict(self):
+        assert au.extract_equipment("<html><body></body></html>") == {}
+
+
+class TestExtractSourceListing:
+    def test_extracts_source_from_real_fixture(self):
+        html = load_fixture("detail_6690428.html")
+        source = au.extract_source_listing(html)
+        assert source == {
+            "sourcePlatform": "autoscout24-ch",
+            "sourcePath": "/de-ch/das_wiedersehen/autoscout24-ch/6690428/8571289",
+        }
+
+    def test_returns_none_when_absent(self):
+        assert au.extract_source_listing("<html><body>native listing</body></html>") is None
+
+
+class TestPlaceholderExtractors:
+    def test_extract_dealer_name_returns_none(self):
+        assert au.extract_dealer_name("<html>anything</html>") is None
+
+    def test_extract_description_returns_none(self):
+        assert au.extract_description("<html>anything</html>") is None
+
+    def test_extract_vin_returns_none(self):
+        assert au.extract_vin("<html>anything</html>") is None
