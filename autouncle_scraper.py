@@ -284,7 +284,7 @@ def resolve_model_key(make_key: str, model_query: str, config: dict[str, Any]) -
 # JSON-LD extraction (shared by search-result and detail pages)
 # ============================================================
 
-_LDJSON_RE = re.compile(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+_LDJSON_RE = re.compile(r'<script(?=[^>]*type="application/ld\+json")[^>]*>(.*?)</script>', re.S)
 _LISTING_ID_RE = re.compile(r"/d/(\d+)-")
 
 
@@ -510,3 +510,102 @@ def search_listings(
         logger.info("  site reports %d total matches; collected %d unique listings", total_elements, len(listings))
 
     return listings
+
+
+# ============================================================
+# Detail-page parsing (JSON-LD + price history)
+# ============================================================
+
+_PRICE_HISTORY_DATE_RE = re.compile(r"Preis am (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2})")
+
+
+def build_detail_url(domain_cfg: DomainConfig, listing_id: str) -> str:
+    """AutoUncle detail URLs normally carry a marketing SEO slug after the
+    id (e.g. "/d/6690428-gebraucht-2011-vw-golf-160-ps"), but the bare
+    "/d/{id}" form (no slug) also resolves - AutoScout24's listing_url()
+    doesn't need to know the slug either, so this mirrors that."""
+    return f"https://{domain_cfg.host}/{domain_cfg.locale}/d/{listing_id}"
+
+
+def _price_history_from_dataset(dataset: dict[str, Any]) -> list[dict[str, Any]]:
+    """AutoUncle's price-history Dataset has no dedicated datetime field per
+    entry - the ISO datetime only exists embedded in the human-readable
+    "Preis am <ISO datetime>" name string, so it has to be regexed out.
+    Entries that don't match are skipped (logged, not raised) rather than
+    aborting the whole detail parse over one malformed entry."""
+    history: list[dict[str, Any]] = []
+    for entry in dataset.get("variableMeasured", []) or []:
+        name = entry.get("name", "")
+        m = _PRICE_HISTORY_DATE_RE.search(name)
+        if not m:
+            logger.debug("Could not parse a date out of price-history entry name %r; skipping", name)
+            continue
+        history.append(
+            {
+                "date": m.group(1),
+                "price": entry.get("value"),
+                "currency": entry.get("unitText"),
+                "description": entry.get("description"),
+            }
+        )
+    return history
+
+
+def parse_detail_jsonld(html: str) -> dict[str, Any]:
+    """Parse a listing detail page's JSON-LD into one merged dict: the
+    normalized Product+Vehicle record (same parser used for search-result
+    items, but with more fields populated here - full address,
+    additionalProperty market-analysis fields) plus a "priceHistory" list
+    from the sibling Dataset object, when present."""
+    graph = _graph_items(html)
+    vehicle = find_vehicle(graph)
+    if vehicle is None:
+        raise ValueError("No Vehicle JSON-LD object found on detail page")
+
+    parsed = parse_vehicle_jsonld(vehicle)
+
+    dataset = find_dataset(graph)
+    if dataset is not None:
+        parsed["priceHistory"] = _price_history_from_dataset(dataset)
+        parsed["datasetLicense"] = dataset.get("license")
+        parsed["datasetIsAccessibleForFree"] = dataset.get("isAccessibleForFree")
+    else:
+        parsed["priceHistory"] = []
+
+    return parsed
+
+
+def fetch_detail(listing_id: str, *, domain_cfg: DomainConfig, session: requests.Session) -> dict[str, Any]:
+    """Fetch and parse one listing's detail page."""
+    url = build_detail_url(domain_cfg, listing_id)
+    resp = request_with_retries(session, "GET", url)
+    detail = parse_detail_jsonld(resp.text)
+    detail.setdefault("id", listing_id)
+    detail["url"] = url
+    return detail
+
+
+def visit_all_listings(
+    listing_ids: Iterable[str],
+    *,
+    domain_cfg: DomainConfig,
+    session: requests.Session,
+    delay: float = 0.4,
+    verbose: bool = True,
+) -> list[dict[str, Any]]:
+    """Visit each listing id's detail page one by one and return the full
+    parsed record for each. This is where the vast majority of scraped
+    fields come from - full address, price history, market-analysis
+    labels - regardless of whether the search phase used JSON-LD or the
+    filtered GraphQL+RSC path."""
+    ids = list(listing_ids)
+    total = len(ids)
+    visited: list[dict[str, Any]] = []
+    for i, listing_id in enumerate(ids, 1):
+        detail = fetch_detail(listing_id, domain_cfg=domain_cfg, session=session)
+        visited.append(detail)
+        if verbose and (i % 10 == 0 or i == total):
+            logger.info("  visited %d/%d listings (id=%s)", i, total, listing_id)
+        if i < total:
+            time.sleep(delay)
+    return visited
