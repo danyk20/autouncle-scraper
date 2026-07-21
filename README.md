@@ -1,0 +1,168 @@
+# AutoUncle Scraper
+
+[![CI](https://github.com/danyk20/autouncle-scraper/actions/workflows/ci.yml/badge.svg)](https://github.com/danyk20/autouncle-scraper/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/autouncle-scraper)](https://pypi.org/project/autouncle-scraper/)
+[![Coverage](https://img.shields.io/badge/unit%20test%20coverage-100%25-brightgreen)](#testing)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue)](https://www.python.org/)
+
+> Unofficial, independently developed project — not affiliated with, endorsed by, or sponsored by AutoUncle ApS. "AutoUncle" is a trademark of its respective owner.
+
+Fetches every listing for a given brand/model from AutoUncle — for free, no
+API key, no paid scraping service. It's a drop-in-compatible sibling of the
+[AutoScout24 scraper](https://github.com/danyk20/autoscout24-scraper): same
+`scrape()` call shape, same `ScrapeResult` return type, same CLI flags, same
+MIT license and tooling — switch `from autoscout24_scraper import scrape` to
+`from autouncle_scraper import scrape` and the rest of your code doesn't
+need to change.
+
+Under the hood the two projects work differently, because the two sites do:
+AutoScout24 exposes one clean JSON API; AutoUncle is a Next.js site with no
+such API, so this scraper reads the same structured data (schema.org
+JSON-LD) and, for filtered searches, the same internal data mechanism
+(GraphQL + React Server Components) AutoUncle's own frontend uses — all
+reverse-engineered by observing real traffic, documented in full in the
+module docstring and [docs/REFERENCE.md](docs/REFERENCE.md).
+
+**A stronger legal footing than most scrapers.** AutoUncle's own detail
+pages explicitly mark their listing data as a `Dataset` with
+`"isAccessibleForFree": true`, licensed
+[**CC BY 4.0**](https://creativecommons.org/licenses/by/4.0/). That's not
+just "we call their own frontend's endpoint" reasoning (though that's true
+too, same as AutoScout24) — it's AutoUncle's own explicit declaration that
+this data is meant to be freely reused, with attribution.
+
+**🤖 Robot-friendly.** This project is explicitly intended to be run, read,
+imported, or adapted by AI agents and bots, same as a human developer — see
+[License](#license).
+
+## Setup
+
+Requires [pipenv](https://pipenv.pypa.io/) (`brew install pipenv`).
+
+```bash
+git clone https://github.com/danyk20/autouncle-scraper.git
+cd autouncle-scraper
+pipenv install --dev
+```
+
+Contributing, linting, and testing commands: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Usage
+
+### CLI
+
+```bash
+pipenv run python autouncle_scraper.py --make VW --model Golf
+```
+
+Prints progress, then writes `vw_golf.csv` and `vw_golf.json` in the current
+directory. Installed via `pip install` instead? Drop `pipenv run` — the same
+command is `autouncle-scraper --make VW --model Golf`.
+
+| Flag | Description |
+|---|---|
+| `--version` | Print the installed version and exit |
+| `--make` | Brand name, e.g. `VW` (required) |
+| `--model` | Model name, e.g. `Golf` (required) |
+| `--domain` | Country domain (default `ch`) — only `ch` is implemented today, see [docs/REFERENCE.md](docs/REFERENCE.md#domains) |
+| `--category` | `car` (default) — the only category implemented |
+| `--out` | Output file base name, without extension. Defaults to `<make>_<model>` |
+| `--no-detail` | Skip per-listing detail visits (unfiltered searches only — see below) |
+| `--delay` | Seconds between requests (default `0.4`) — raise this if you get rate-limited |
+| `--price-from` / `--price-to` | Filter by price in CHF (inclusive, either end optional) |
+| `--mileage-from` / `--mileage-to` | Filter by mileage in km (inclusive, either end optional) |
+| `--year-from` / `--year-to` | Filter by first-registration year (inclusive, either end optional) |
+| `-v` / `--verbose` | Also show debug-level detail, including every HTTP request (mutually exclusive with `-q`) |
+| `-q` / `--quiet` | Suppress progress output; only warnings/errors (mutually exclusive with `-v`) |
+
+Filters combine with AND and are applied server-side. A mistyped make/model
+prints a clean error (plus, for an unknown model, the list of valid models)
+instead of crashing.
+
+```bash
+# Fast mode: search results only, skip per-listing detail
+pipenv run python autouncle_scraper.py --make VW --model Golf --no-detail
+
+# 2015 or newer, under CHF 30'000
+pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --price-to 30000 --year-from 2015
+```
+
+**One honest asymmetry vs. AutoScout24**: unfiltered searches use
+schema.org JSON-LD, which is already fairly rich even without `--no-detail`.
+Filtered searches use a different mechanism (see
+[docs/REFERENCE.md](docs/REFERENCE.md)) that carries *only* listing ids —
+so `--no-detail` on a filtered search gives you ids only, plus a logged
+warning. Leave `--no-detail` off (the default) for anything beyond a bare
+count.
+
+### As a library
+
+```bash
+pip install autouncle-scraper
+```
+
+```python
+from autouncle_scraper import scrape
+
+result = scrape("VW", "Golf", price_to=30000, year_from=2015)
+
+for row in result.rows:          # list[dict], CSV-ready
+    print(row["price"], row["mileageKm"], row["url"])
+
+result.to_csv("vw_golf.csv")  # optional — no files are written unless you ask
+```
+
+Full `scrape()` signature, the `ScrapeResult` return type, and the complete
+JSON/CSV field schema — including price history, gallery, and equipment
+fields AutoScout24 doesn't have — **[docs/REFERENCE.md](docs/REFERENCE.md)**.
+
+## Testing
+
+```bash
+pipenv run pytest                    # unit tests (fast, no network), 100% coverage
+pipenv run pytest -m e2e --no-cov    # end-to-end tests against the real live site
+pipenv run pytest -m "e2e or not e2e" --no-cov  # everything
+```
+
+Unit tests mock all HTTP (via [`responses`](https://github.com/getsentry/responses))
+against fixtures that are real captures from the live site, and cover 100%
+of `autouncle_scraper.py`. E2E tests target a narrow, low-volume model (VW
+Golf Alltrack) to confirm the scraper still works against the live site
+without putting real load on it. Coverage detail by area:
+[docs/REFERENCE.md](docs/REFERENCE.md#test-coverage-by-area).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, pre-PR checks, and
+what to do if AutoUncle changes its markup.
+
+Be a reasonable citizen: the default request delay is intentional — this
+scrapes an undocumented data mechanism the site's own frontend uses, not a
+public API with a stated rate limit. Don't remove the delay or crank up
+concurrency.
+
+## License
+
+Released under the [MIT License](LICENSE) — you can use, copy, modify,
+merge, publish, distribute, and sell copies of this code, for free, for any
+purpose, commercial or not, as long as the license text stays attached. No
+warranty.
+
+**AI agents, LLM-based coding assistants, and other bots are explicitly
+welcome to use this project** — to run the scraper, read and parse its
+output, import `scrape()` into another project, or read and adapt its
+source — under exactly the same terms as a human, with no additional
+restriction and no need to ask permission. That's why
+[docs/REFERENCE.md](docs/REFERENCE.md) documents the full function
+signature, return type, and data schema: so a bot can integrate correctly
+without a human in the loop.
+
+This license covers this project's own code. It does not, by itself, grant
+any rights to AutoUncle's data beyond what AutoUncle itself has already
+declared: its listing `Dataset` objects are explicitly marked
+`"isAccessibleForFree": true` and licensed
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) — see
+[docs/REFERENCE.md](docs/REFERENCE.md) for exactly where that declaration
+lives. What you do with the scraped results is between you and AutoUncle's
+terms of service.
