@@ -99,10 +99,12 @@ This module can be used two ways:
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import logging
 import re
+import sys
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -1149,3 +1151,274 @@ class ScrapeResult:
 
     def to_json(self, path: str) -> None:
         save_json(self.listings, path)
+
+
+# ============================================================
+# Public scrape() API
+# ============================================================
+
+SUPPORTED_CATEGORIES = ("car",)
+
+
+def scrape(
+    make: str,
+    model: str,
+    *,
+    domain: str = DEFAULT_DOMAIN,
+    category: str = "car",
+    detail: bool = True,
+    price_from: int | None = None,
+    price_to: int | None = None,
+    mileage_from: int | None = None,
+    mileage_to: int | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    delay: float = 0.4,
+    verbose: bool = True,
+    session: requests.Session | None = None,
+) -> ScrapeResult:
+    """Search autouncle.<domain> for a make/model and return the results in memory.
+
+    Same call shape as the AutoScout24 scraper's scrape(), so switching
+    `from autoscout24_scraper import scrape` to
+    `from autouncle_scraper import scrape` needs no other code changes for
+    a caller that only uses these parameters.
+
+    Args:
+        make: Brand name, e.g. "VW" (case-insensitive, substring matching supported).
+        model: Model name, e.g. "Golf" (case-insensitive, substring matching supported).
+        domain: Country domain to scrape, e.g. "ch" (default and, as of this
+            writing, only implemented value - see the module docstring).
+        category: "car" (default) - the only vehicle category AutoUncle
+            surfaces in primary navigation as of this writing. Kept as a
+            parameter (rather than dropped) for signature parity with the
+            AutoScout24 scraper; any other value raises ValueError.
+        detail: If True (default), visit every listing's detail page one by
+            one for the full record (address, price history, gallery,
+            equipment - see the module docstring). If False, unfiltered
+            searches keep the still-fairly-rich JSON-LD summary fields;
+            filtered searches keep only bare ids (RSC carries no summary
+            fields at all - a warning is logged in that case).
+        price_from/price_to: Optional price range in CHF (inclusive).
+        mileage_from/mileage_to: Optional mileage range in km (inclusive).
+        year_from/year_to: Optional first-registration year range (inclusive).
+        delay: Seconds to wait between requests.
+        verbose: If True, emit progress via the "autouncle_scraper" logger at INFO level.
+        session: Optional requests.Session to reuse (e.g. across repeated
+            calls). A new one is created if not given.
+
+    Returns:
+        A ScrapeResult with `.listings` (raw parsed records) and `.rows`
+        (flattened dicts, one per listing, sorted by price ascending where known).
+    """
+    if category not in SUPPORTED_CATEGORIES:
+        raise ValueError(f"Unsupported category {category!r}. Only {SUPPORTED_CATEGORIES} are implemented.")
+
+    for lo_name, hi_name, lo, hi in (
+        ("price_from", "price_to", price_from, price_to),
+        ("mileage_from", "mileage_to", mileage_from, mileage_to),
+        ("year_from", "year_to", year_from, year_to),
+    ):
+        if lo is not None and hi is not None and lo > hi:
+            raise ValueError(f"{lo_name} ({lo}) cannot be greater than {hi_name} ({hi})")
+
+    domain_cfg = get_domain_config(domain)
+    session = session or make_session()
+    filtered = any(v is not None for v in (price_from, price_to, mileage_from, mileage_to, year_from, year_to))
+
+    if verbose:
+        logger.info("Resolving make %r ...", make)
+    config = fetch_search_form_config(domain, session=session)
+    make_key = resolve_make_key(make, config)
+    if verbose:
+        logger.info("  -> make %r", make_key)
+
+    if verbose:
+        logger.info("Resolving model %r for make %r ...", model, make_key)
+    model_key = resolve_model_key(make_key, model, config)
+    if verbose:
+        logger.info("  -> model %r", model_key)
+
+    if verbose:
+        active_filters = []
+        if price_from is not None or price_to is not None:
+            active_filters.append(f"price {price_from or 0}-{price_to or '∞'} CHF")
+        if mileage_from is not None or mileage_to is not None:
+            active_filters.append(f"mileage {mileage_from or 0}-{mileage_to or '∞'} km")
+        if year_from is not None or year_to is not None:
+            active_filters.append(f"year {year_from or '…'}-{year_to or '…'}")
+        filter_note = f" [filters: {', '.join(active_filters)}]" if active_filters else ""
+        logger.info("Fetching listings for %s %s (autouncle.%s)%s ...", make_key, model_key, domain, filter_note)
+
+    if filtered:
+        listings = search_listings_filtered(
+            make_key,
+            model_key,
+            domain_cfg,
+            session=session,
+            price_from=price_from,
+            price_to=price_to,
+            mileage_from=mileage_from,
+            mileage_to=mileage_to,
+            year_from=year_from,
+            year_to=year_to,
+            delay=delay,
+            verbose=verbose,
+        )
+    else:
+        listings = search_listings(make_key, model_key, domain_cfg, session=session, delay=delay, verbose=verbose)
+    total_reported = len(listings)
+
+    if detail:
+        if verbose:
+            logger.info("Visiting each of %d listings one by one to extract full details ...", len(listings))
+        listing_ids = [item["id"] for item in listings if item.get("id")]
+        listings = visit_all_listings(listing_ids, domain_cfg=domain_cfg, session=session, delay=delay, verbose=verbose)
+    elif filtered:
+        logger.warning(
+            "detail=False on a filtered search keeps only bare listing ids - "
+            "RSC (the filtered-search data source) carries no summary fields, unlike JSON-LD."
+        )
+
+    rows = [flatten_listing(item) for item in listings]
+    rows.sort(key=lambda r: (r.get("price") in (None, ""), r.get("price")))
+
+    return ScrapeResult(
+        make=make_key,
+        model=model_key,
+        domain=domain,
+        filtered=filtered,
+        total_reported=total_reported,
+        listings=listings,
+        rows=rows,
+    )
+
+
+# ============================================================
+# CLI
+# ============================================================
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Scrape autouncle.ch listings for a given make/model.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--make", required=True, help="Brand name, e.g. 'VW'")
+    parser.add_argument("--model", required=True, help="Model name, e.g. 'Golf'")
+    parser.add_argument(
+        "--domain",
+        default=DEFAULT_DOMAIN,
+        help=f"Country domain to scrape, matching autouncle.<domain> (default: {DEFAULT_DOMAIN!r}). "
+        f"Only 'ch' is implemented as of this writing; see the module docstring.",
+    )
+    parser.add_argument(
+        "--category", default="car", choices=list(SUPPORTED_CATEGORIES), help="Vehicle category (default: car)"
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Output file base name (without extension). Defaults to '<make>_<model>' in the current directory.",
+    )
+    parser.add_argument(
+        "--no-detail",
+        action="store_true",
+        help="Skip visiting each listing's detail page; keep only the summary fields available from the search "
+        "phase (unfiltered searches only - filtered searches always need detail for anything beyond an id).",
+    )
+    parser.add_argument("--delay", type=float, default=0.4, help="Delay in seconds between requests.")
+    parser.add_argument("--price-from", type=int, default=None, help="Minimum price in CHF (inclusive).")
+    parser.add_argument("--price-to", type=int, default=None, help="Maximum price in CHF (inclusive).")
+    parser.add_argument("--mileage-from", type=int, default=None, help="Minimum mileage in km (inclusive).")
+    parser.add_argument("--mileage-to", type=int, default=None, help="Maximum mileage in km (inclusive).")
+    parser.add_argument("--year-from", type=int, default=None, help="Earliest first-registration year (inclusive).")
+    parser.add_argument("--year-to", type=int, default=None, help="Latest first-registration year (inclusive).")
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v", "--verbose", action="store_true", help="Show debug-level detail, including every HTTP request made."
+    )
+    verbosity.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress progress output; only warnings/errors are shown."
+    )
+    return parser
+
+
+def _configure_cli_logging(*, verbose: bool, quiet: bool) -> None:
+    """Set up console logging for CLI use: progress (INFO, or DEBUG with
+    -v) goes to stdout, warnings/errors (-q still shows these) go to
+    stderr. Only main() calls this - plain library use of scrape() never
+    touches logging config, since that would be rude to whatever
+    application imported it."""
+    level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
+    plain = logging.Formatter("%(message)s")
+
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(level)
+    stdout_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+    stdout_handler.setFormatter(plain)
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(plain)
+
+    logger.handlers.clear()
+    logger.addHandler(stdout_handler)
+    logger.addHandler(stderr_handler)
+    logger.setLevel(level)
+    logger.propagate = False
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI entry point. Parses argv (defaults to sys.argv[1:]), scrapes, and
+    writes CSV + JSON files. Returns 0 on success; lets exceptions propagate
+    (see run_cli() for the error-handling / exit-code wrapper used by the
+    __main__ guard below)."""
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    _configure_cli_logging(verbose=args.verbose, quiet=args.quiet)
+
+    result = scrape(
+        args.make,
+        args.model,
+        domain=args.domain,
+        category=args.category,
+        detail=not args.no_detail,
+        price_from=args.price_from,
+        price_to=args.price_to,
+        mileage_from=args.mileage_from,
+        mileage_to=args.mileage_to,
+        year_from=args.year_from,
+        year_to=args.year_to,
+        delay=args.delay,
+        verbose=True,
+    )
+
+    out_base = args.out or f"{result.make}_{result.model}".lower().replace(" ", "-")
+    csv_path = f"{out_base}.csv"
+    json_path = f"{out_base}.json"
+    result.to_csv(csv_path)
+    result.to_json(json_path)
+
+    logger.info("\nDone. %d unique listings found.", len(result.rows))
+    logger.info("  CSV:  %s", csv_path)
+    logger.info("  JSON: %s", json_path)
+    return 0
+
+
+def run_cli(argv: list[str] | None = None) -> int:
+    """Run main() and translate exceptions into (message, exit code) the way
+    the command line expects. Factored out from the __main__ guard so it can
+    be unit-tested directly without spawning a subprocess."""
+    try:
+        return main(argv) or 0
+    except ValueError as exc:
+        logger.error("Error: %s", exc)
+        return 1
+    except requests.RequestException as exc:
+        logger.error("Network error talking to autouncle.ch: %s", exc)
+        return 1
+    except KeyboardInterrupt:
+        logger.error("\nInterrupted.")
+        return 130
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised via subprocess in test_e2e.py
+    sys.exit(run_cli())
