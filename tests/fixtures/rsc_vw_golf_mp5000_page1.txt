@@ -1,0 +1,3 @@
+1:"$Sreact.fragment"
+4a:["$","div",null,{"className":"_Y9UYF","children":[["$","$1","6979282",{"children":[false,false,false,"$L56",false]}],["$","$1","6963095",{"children":[false,false,false,"$L57",false]}],["$","$1","6998522",{"children":[false,false,false,"$L58",false]}],["$","$1","6990234",{"children":[false,false,false,"$L59",["$","$L5a",null,{}]]}],["$","$1","6835111",{"children":[false,false,false,"$L5b",false]}]]}]
+4c:["$","$L5c",null,{"pagination":{"currentPage":1,"lastPage":true,"firstPage":true,"limitValue":25,"outOfRange":false},"resultsInfo":"Zeige 1 - 5 von 5 Resultate","totalPages":1,"maxPageNumber":100,"fullUrl":"https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf/mp-unter-5000-chf","searchContext":"VW Golf"}]

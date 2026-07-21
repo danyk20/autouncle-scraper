@@ -27,31 +27,29 @@ on what you ask for:
 
   3. Filtered search results (any price/mileage/year filter):
      Confirmed by both raw HTTP fetch and full browser navigation: as soon
-     as ANY filter is applied - whether as a query string or as the SEO
-     slug-path form AutoUncle's own frontend uses (e.g.
-     ".../VW/Golf/mp-unter-5000-chf" for "max price under 5000 CHF") - the
-     server marks the page `<meta name="robots" content="noindex, follow">`
-     and omits the JSON-LD block entirely. This is a deliberate
-     anti-duplicate-content choice on AutoUncle's part, not a caching
-     artifact. So filtered search has to go a different route:
-       a. POST https://www.autouncle.ch/graphql with a `CarSearchInput`
-          object to resolve the canonical filtered-search slug URL
-          (`carSearchUrl` query) and/or a live match count (`countCars`
-          query) - see `graphql_request()`, `resolve_filtered_search_url()`,
-          `count_cars()`.
-       b. Fetch that slug URL per page with the header `RSC: 1`, which
-          returns Next.js's React Server Component "Flight" wire format
-          instead of full HTML (much smaller, no JSON-LD either, but it is
-          what the site's own frontend uses to hydrate filtered results
-          client-side). Rather than writing a general Flight-protocol
-          deserializer (a substantial, framework-internal-format,
-          version-fragile undertaking), this module extracts only two
-          things from that text via small targeted regexes: pagination
-          metadata and the ordered list of listing ids on the page - see
-          `fetch_rsc_page()`, `parse_rsc_pagination()`,
-          `parse_rsc_listing_ids()`. Filtered search therefore only ever
+     as ANY filter is applied, the server marks the page `<meta
+     name="robots" content="noindex, follow">` and omits the JSON-LD block
+     entirely - a deliberate anti-duplicate-content choice, not a caching
+     artifact. Filtering instead works like this (see the "Filtered search"
+     section below for the full derivation):
+       a. Max price canonicalizes into an SEO path segment,
+          "/mp-unter-{price}-chf"; every other filter (min price, min/max
+          km, min/max year) is a Rails-style nested query param,
+          "?s[min_price]=X&s[min_km]=Y&...", sorted alphabetically by key
+          (build_filtered_search_url()).
+       b. Fetch that URL per page with the header `RSC: 1`, which returns
+          Next.js's React Server Component "Flight" wire format instead of
+          full HTML. Rather than writing a general Flight-protocol
+          deserializer, this module extracts only two things via small
+          targeted regexes: pagination metadata and the ordered list of
+          listing ids on the page (fetch_rsc_page(), parse_rsc_pagination(),
+          parse_rsc_listing_ids()). Filtered search therefore only ever
           yields listing ids, not rich summary fields - the detail phase
           (point 4) is what fills those in, same as the unfiltered path.
+       c. AutoUncle's GraphQL endpoint also exposes a `countCars` query
+          with the same filter shape, confirmed live and used as a fast,
+          optional total-count check (count_cars()) - it is a supplement,
+          not the mechanism that yields listing data.
 
   4. Listing detail pages:
        GET https://www.autouncle.ch/{locale}/d/{id}-{seo-slug}
@@ -732,3 +730,289 @@ def visit_all_listings(
         if i < total:
             time.sleep(delay)
     return visited
+
+
+# ============================================================
+# Filtered search (price/mileage/year) via RSC + GraphQL
+#
+# Server-rendered JSON-LD (see the "Unfiltered search" section above) is
+# ONLY emitted for the plain, unfiltered brand/model URL - confirmed
+# empirically: any filter, however it's expressed in the URL, gets
+# `<meta name="robots" content="noindex, follow">` and no JSON-LD at all.
+# So filtering needs a different mechanism entirely. Live reverse-engineering
+# (driving the real filter form with `window.fetch` monkey-patched, per
+# CONTRIBUTING.md) turned up this actual, and fully working, mechanism -
+# note it is NOT what an earlier pass of this investigation assumed (a
+# `carSearchUrl` GraphQL query does not exist; that was a misread of an
+# unrelated response captured while investigating overlapping requests):
+#
+#   - Every filter *except* max price is a Rails-style nested query
+#     parameter on the plain search URL: `?s[min_price]=X&s[min_km]=Y&
+#     s[max_km]=Z&s[min_year]=A&s[max_year]=B`.
+#   - Max price is the one exception: AutoUncle canonicalizes it into an
+#     SEO-friendly URL path segment, `/mp-unter-{price}-chf` ("mp" = max
+#     price, "unter" = German "under"), appended right after the model.
+#   - The canonical param ORDER is the query keys sorted alphabetically.
+#     Requesting a non-canonical order (or an un-canonicalized combination)
+#     doesn't 404 - it 200s with a Next.js "soft" redirect encoded *inside*
+#     the response body itself (a `NEXT_REDIRECT;replace;<url>;308;` marker
+#     in the RSC stream, not a real HTTP 3xx), pointing at the canonical
+#     URL. build_filtered_search_url() below builds the canonical form
+#     directly, so that redirect is never actually hit.
+#   - Fetching that URL with the header `RSC: 1` returns Next.js's React
+#     Server Component "Flight" wire format instead of full HTML - much
+#     smaller, and (confirmed across 4 independent real captures spanning
+#     single- and multi-filter combinations, 5 to 903 total results, pages
+#     1 and 2) reliably contains a `"resultsInfo":"Zeige X - Y von Z
+#     Resultate"` string and a `"pagination":{"currentPage":N,
+#     "lastPage":true|false,...}` object, plus the ids of every listing on
+#     that page as `,"<6-7 digit id>",{"children"`. Rather than writing a
+#     general Flight-protocol deserializer (a substantial,
+#     framework-internal-format, version-fragile undertaking), this module
+#     extracts only those two things via small targeted regexes - see
+#     parse_rsc_pagination() / parse_rsc_listing_ids().
+#   - Filtered search therefore only ever yields listing ids, not rich
+#     summary fields (RSC carries no equivalent of the JSON-LD ItemList
+#     item shape) - the detail phase (fetch_detail(), above) is what fills
+#     those in, same as the unfiltered path.
+#
+# The site's own GraphQL endpoint also exposes a `countCars` query with the
+# same filter shape (confirmed live) - genuinely useful as a fast, cheap way
+# to get an authoritative total before paginating, so it's used for that,
+# but it is a supplement, not the mechanism that yields listing data.
+# ============================================================
+
+_FILTER_QUERY_PARAM_NAMES = {
+    "price_from": "min_price",
+    "mileage_from": "min_km",
+    "mileage_to": "max_km",
+    "year_from": "min_year",
+    "year_to": "max_year",
+}
+
+_RSC_RESULTS_INFO_RE = re.compile(r'"resultsInfo":"([^"]*)"')
+_RSC_PAGINATION_RE = re.compile(r'"pagination":\{"currentPage":(\d+),"lastPage":(true|false)')
+_RSC_LISTING_ID_RE = re.compile(r',"(\d{6,7})",\{"children"')
+_RSC_TOTAL_FROM_RESULTS_INFO_RE = re.compile(r"von ([\d’']+) ")
+
+GRAPHQL_ENDPOINT_PATH = "/graphql"
+
+
+def build_filtered_search_url(
+    domain_cfg: DomainConfig,
+    make_key: str,
+    model_key: str,
+    *,
+    price_from: int | None = None,
+    price_to: int | None = None,
+    mileage_from: int | None = None,
+    mileage_to: int | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    page: int = 1,
+) -> str:
+    """Build the canonical (redirect-free) filtered search URL: max price as
+    the /mp-unter-{price}-chf path segment, everything else as sorted
+    s[...] query params - see the section docstring above for how this was
+    derived."""
+    path_parts = [domain_cfg.locale, domain_cfg.cars_path, make_key, model_key]
+    if price_to is not None:
+        path_parts.append(f"mp-unter-{price_to}-chf")
+    path = "/".join(quote(seg, safe="") for seg in path_parts)
+
+    filters = {
+        "price_from": price_from,
+        "mileage_from": mileage_from,
+        "mileage_to": mileage_to,
+        "year_from": year_from,
+        "year_to": year_to,
+    }
+    query_params: list[tuple[str, str]] = []
+    for name, value in filters.items():
+        if value is not None:
+            query_params.append((f"s[{_FILTER_QUERY_PARAM_NAMES[name]}]", str(value)))
+    if page > 1:
+        query_params.append(("page", str(page)))
+    query_params.sort(key=lambda kv: kv[0])
+
+    url = f"https://{domain_cfg.host}/{path}"
+    if query_params:
+        query_string = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in query_params)
+        url += f"?{query_string}"
+    return url
+
+
+def fetch_rsc_page(url: str, *, session: requests.Session) -> str:
+    resp = request_with_retries(session, "GET", url, headers={"RSC": "1"})
+    return resp.text
+
+
+def parse_rsc_pagination(rsc_text: str) -> dict[str, Any]:
+    """Extract pagination metadata from an RSC Flight response: current
+    page, whether it's the last page, the raw "Zeige X - Y von Z" string,
+    and the total result count parsed out of that string."""
+    results_info_m = _RSC_RESULTS_INFO_RE.search(rsc_text)
+    pagination_m = _RSC_PAGINATION_RE.search(rsc_text)
+    results_info = results_info_m.group(1) if results_info_m else None
+
+    total: int | None = None
+    if results_info:
+        total_m = _RSC_TOTAL_FROM_RESULTS_INFO_RE.search(results_info)
+        if total_m:
+            digits = total_m.group(1).replace("’", "").replace("'", "")
+            total = _to_int(digits)
+
+    return {
+        "currentPage": _to_int(pagination_m.group(1)) if pagination_m else None,
+        "lastPage": (pagination_m.group(2) == "true") if pagination_m else None,
+        "resultsInfo": results_info,
+        "total": total,
+    }
+
+
+def parse_rsc_listing_ids(rsc_text: str) -> list[str]:
+    """Extract the ordered list of listing ids on an RSC Flight page. Raises
+    RuntimeError (rather than silently returning an empty page) if the
+    pagination metadata claims a non-zero total but no ids were found -
+    that combination means the anchor pattern stopped matching (e.g. a
+    frontend markup change), not that the page is legitimately empty."""
+    ids = _RSC_LISTING_ID_RE.findall(rsc_text)
+    if not ids:
+        pagination = parse_rsc_pagination(rsc_text)
+        if pagination["total"]:
+            raise RuntimeError(
+                "RSC listing-id pattern matched zero ids on a page reporting "
+                f"{pagination['total']} total results; AutoUncle's markup may have changed."
+            )
+    return ids
+
+
+def build_car_search_input(
+    make_key: str,
+    model_key: str,
+    *,
+    price_from: int | None = None,
+    price_to: int | None = None,
+    mileage_from: int | None = None,
+    mileage_to: int | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+) -> dict[str, Any]:
+    """Build the CarSearchInput GraphQL variable object used by
+    count_cars(). Field names confirmed live by monkey-patching
+    window.fetch and driving the real filter form one control at a time."""
+    car_search: dict[str, Any] = {
+        "brand": make_key,
+        "carModel": model_key,
+        "brandsModels": [{"brand": make_key, "modelName": model_key, "equipmentVariants": None}],
+    }
+    if price_from is not None:
+        car_search["minPrice"] = price_from
+    if price_to is not None:
+        car_search["maxPrice"] = price_to
+    if mileage_from is not None:
+        car_search["minKm"] = mileage_from
+    if mileage_to is not None:
+        car_search["maxKm"] = mileage_to
+    if year_from is not None:
+        car_search["minYear"] = year_from
+    if year_to is not None:
+        car_search["maxYear"] = year_to
+    return car_search
+
+
+_COUNT_CARS_QUERY = (
+    "query countCars($carSearch: CarSearchInput!) {\n  numberOfCars: countCars(carSearch: $carSearch)\n}"
+)
+
+
+def graphql_request(
+    query: str, variables: dict[str, Any], *, domain_cfg: DomainConfig, session: requests.Session
+) -> dict[str, Any]:
+    url = f"https://{domain_cfg.host}{GRAPHQL_ENDPOINT_PATH}"
+    resp = request_with_retries(
+        session,
+        "POST",
+        url,
+        json={"query": query, "variables": variables},
+        headers={"Content-Type": "application/json"},
+    )
+    data: dict[str, Any] = resp.json()
+    if "errors" in data:
+        raise ValueError(f"GraphQL request failed: {data['errors']}")
+    return data
+
+
+def count_cars(car_search_input: dict[str, Any], *, domain_cfg: DomainConfig, session: requests.Session) -> int:
+    """Fast, authoritative match count for a CarSearchInput, straight from
+    AutoUncle's own GraphQL endpoint - the same query its filter UI calls
+    on every keystroke. Useful for logging/progress before paginating."""
+    data = graphql_request(_COUNT_CARS_QUERY, {"carSearch": car_search_input}, domain_cfg=domain_cfg, session=session)
+    count: int = data["data"]["numberOfCars"]
+    return count
+
+
+def search_listings_filtered(
+    make_key: str,
+    model_key: str,
+    domain_cfg: DomainConfig,
+    *,
+    session: requests.Session,
+    price_from: int | None = None,
+    price_to: int | None = None,
+    mileage_from: int | None = None,
+    mileage_to: int | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    delay: float = 0.4,
+    verbose: bool = True,
+) -> list[dict[str, Any]]:
+    """Collect every listing id matching a price/mileage/year filter, via
+    the RSC mechanism described in the section docstring above. Unlike
+    search_listings() (the unfiltered/JSON-LD path), each returned dict only
+    has an "id" key - RSC carries no rich per-listing summary fields, so the
+    detail phase (visit_all_listings()) is what fills in everything else."""
+    listings: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    page = 1
+    last_page = False
+
+    while not last_page:
+        url = build_filtered_search_url(
+            domain_cfg,
+            make_key,
+            model_key,
+            price_from=price_from,
+            price_to=price_to,
+            mileage_from=mileage_from,
+            mileage_to=mileage_to,
+            year_from=year_from,
+            year_to=year_to,
+            page=page,
+        )
+        rsc_text = fetch_rsc_page(url, session=session)
+        pagination = parse_rsc_pagination(rsc_text)
+        ids = parse_rsc_listing_ids(rsc_text)
+
+        new_count = 0
+        for listing_id in ids:
+            if listing_id not in seen_ids:
+                seen_ids.add(listing_id)
+                listings.append({"id": listing_id})
+                new_count += 1
+
+        if verbose:
+            logger.info(
+                "  page %d: %s (%d new, %d total so far)",
+                page,
+                pagination["resultsInfo"] or f"{len(ids)} listings",
+                new_count,
+                len(listings),
+            )
+
+        last_page = bool(pagination["lastPage"]) or not ids or new_count == 0
+        page += 1
+        if not last_page:
+            time.sleep(delay)
+
+    return listings
