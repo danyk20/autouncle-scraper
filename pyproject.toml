@@ -29,7 +29,7 @@ classifiers = [
 Homepage = "https://github.com/danyk20/autouncle-scraper"
 Repository = "https://github.com/danyk20/autouncle-scraper"
 Issues = "https://github.com/danyk20/autouncle-scraper/issues"
-Changelog = "https://github.com/danyk20/autouncle-scraper/blob/master/CHANGELOG.md"
+Changelog = "https://github.com/danyk20/autouncle-scraper/blob/main/CHANGELOG.md"
 
 [project.scripts]
 autouncle-scraper = "autouncle_scraper:run_cli"
