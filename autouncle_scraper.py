@@ -109,7 +109,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -782,37 +782,45 @@ def visit_all_listings(
 
 
 # ============================================================
-# Filtered search (price/mileage/year) via RSC + GraphQL
+# Filtered search (price/mileage/year/...) via RSC + GraphQL
 #
 # Server-rendered JSON-LD (see the "Unfiltered search" section above) is
 # ONLY emitted for the plain, unfiltered brand/model URL - confirmed
 # empirically: any filter, however it's expressed in the URL, gets
 # `<meta name="robots" content="noindex, follow">` and no JSON-LD at all.
 # So filtering needs a different mechanism entirely. Live reverse-engineering
-# (driving the real filter form with `window.fetch` monkey-patched, per
-# CONTRIBUTING.md) turned up this actual, and fully working, mechanism -
+# (driving the real filter form and probing the GraphQL endpoint directly,
+# per CONTRIBUTING.md) turned up this actual, and fully working, mechanism -
 # note it is NOT what an earlier pass of this investigation assumed (a
 # `carSearchUrl` GraphQL query does not exist; that was a misread of an
 # unrelated response captured while investigating overlapping requests):
 #
-#   - Every filter *except* max price is a Rails-style nested query
-#     parameter on the plain search URL: `?s[min_price]=X&s[min_km]=Y&
-#     s[max_km]=Z&s[min_year]=A&s[max_year]=B`.
-#   - Max price is the one exception: AutoUncle canonicalizes it into an
-#     SEO-friendly URL path segment, `/mp-unter-{price}-chf` ("mp" = max
-#     price, "unter" = German "under"), appended right after the model.
-#   - The canonical param ORDER is the query keys sorted alphabetically.
-#     Requesting a non-canonical order (or an un-canonicalized combination)
-#     doesn't 404 - it 200s with a Next.js "soft" redirect encoded *inside*
-#     the response body itself (a `NEXT_REDIRECT;replace;<url>;308;` marker
-#     in the RSC stream, not a real HTTP 3xx), pointing at the canonical
-#     URL. build_filtered_search_url() below builds the canonical form
-#     directly, so that redirect is never actually hit.
-#   - Fetching that URL with the header `RSC: 1` returns Next.js's React
+#   - Every filter is a Rails-style nested query parameter on the plain
+#     search URL: `?s[min_price]=X&s[body_types][]=SUV&s[has_gps]=true&...`
+#     - the snake_case key is just the CarSearchInput GraphQL field name
+#     (see build_car_search_input()) converted via _camel_to_snake();
+#     array-valued filters (bodyTypes, fuelTypes, colors, ...) repeat the
+#     same `s[key][]=` key once per value.
+#   - AutoUncle canonicalizes *some* single-value filters into SEO-friendly
+#     URL path segments instead of leaving them as query params - confirmed
+#     for max price (`/mp-unter-{price}-chf`), a single fuel type
+#     (`/f-{fuel}`), and a single body type (`/b-{bodytype}`) - and sorts
+#     query keys alphabetically. Requesting the non-canonical form (plain
+#     query params, unsorted, whatever) doesn't 404 - it 200s with a
+#     Next.js "soft" redirect encoded *inside* the response body itself (a
+#     `NEXT_REDIRECT;replace;<url>;<code>;` marker in the RSC stream, not a
+#     real HTTP 3xx) pointing at the canonical URL. Rather than replicating
+#     AutoUncle's canonicalization rules by hand (there could be more of
+#     them for filters not yet tried), fetch_rsc_page() below just follows
+#     that embedded redirect itself - so build_filtered_search_url() always
+#     emits the plain query-param form for every filter, uniformly, and
+#     lets the server decide the canonical URL.
+#   - Fetching a search URL with the header `RSC: 1` returns Next.js's React
 #     Server Component "Flight" wire format instead of full HTML - much
-#     smaller, and (confirmed across 4 independent real captures spanning
-#     single- and multi-filter combinations, 5 to 903 total results, pages
-#     1 and 2) reliably contains a `"resultsInfo":"Zeige X - Y von Z
+#     smaller, and (confirmed across many real captures spanning single-
+#     and multi-filter combinations across price/km/year/body type/fuel
+#     type/doors/colors/seller kind/equipment, 0 to 2000+ total results,
+#     multiple pages) reliably contains a `"resultsInfo":"Zeige X - Y von Z
 #     Resultate"` string and a `"pagination":{"currentPage":N,
 #     "lastPage":true|false,...}` object, plus the ids of every listing on
 #     that page as `,"<6-7 digit id>",{"children"`. Rather than writing a
@@ -829,20 +837,76 @@ def visit_all_listings(
 # same filter shape (confirmed live) - genuinely useful as a fast, cheap way
 # to get an authoritative total before paginating, so it's used for that,
 # but it is a supplement, not the mechanism that yields listing data.
+#
+# CarSearchInput field names were confirmed empirically, one at a time, by
+# calling countCars() directly with a candidate field name/value and reading
+# whether the server accepted it or returned "Field is not defined on
+# CarSearchInput" (GraphQL introspection is disabled in production, so this
+# trial-and-error was the only way). Confirmed fields:
+#
+#   minPrice/maxPrice, minKm/maxKm, minYear/maxYear (CHF/km/year ranges)
+#   bodyTypes: list[str]      - see BODY_TYPES
+#   fuelTypes: list[str]      - see FUEL_TYPES
+#   colors: list[str]         - see COLORS
+#   doors: int                - exact match, not a range (no minDoors/maxDoors)
+#   sellerKind: str           - see SELLER_KINDS (singular - one at a time, not a list)
+#   euroEmissionClass: int    - 1-6; data coverage for CH listings seemed sparse
+#                               when this was tested, so don't be surprised by
+#                               a 0 count even for a common class like 6
+#   isOneOwner: bool
+#   notLeasing: bool          - config's own default for this is `true`
+#   notDamaged: bool          - config's own default for this is `false`
+#   minElectricDriveRange/maxElectricDriveRange (km)
+#   minBatteryCapacity/maxBatteryCapacity (kWh)
+#   minEnergyConsumption/maxEnergyConsumption (kWh/100km)
+#   maxFuelEconomy (L/100km)  - no minFuelEconomy; confirmed one-directional
+#   every string in EQUIPMENT_OPTIONS is its OWN top-level boolean field,
+#     e.g. hasGps: true, has_4wd: true - not a single "equipment: [...]" list
+#
+# Tried and NOT found under any reasonable name (seats, transmission/gear,
+# region, priceRating, emissionLabel, daysOnSale, horsepower) - these may
+# not be supported by CarSearchInput at all, or use a name not yet guessed.
 # ============================================================
 
-_FILTER_QUERY_PARAM_NAMES = {
-    "price_from": "min_price",
-    "mileage_from": "min_km",
-    "mileage_to": "max_km",
-    "year_from": "min_year",
-    "year_to": "max_year",
-}
+BODY_TYPES = ["Hatchback", "Sedan", "Stationcar", "MPV", "SUV", "Cabriolet", "Coupe"]
+FUEL_TYPES = ["El", "El_Hybrid", "Benzin", "Diesel", "CNG_Hybrid", "LPG_Hybrid", "Ethanol_Benzin", "Hydrogen"]
+COLORS = [
+    "White", "Black", "Silver", "Grey", "Blue", "Red", "Green", "Brown",
+    "Orange", "Turquoise", "Gold", "Yellow", "Purple", "Beige", "Pink",
+]  # fmt: skip
+SELLER_KINDS = ["Dealer", "Private"]
+EQUIPMENT_OPTIONS = [
+    "hasGps", "hasAircondition", "hasTowBar", "has_4wd", "hasParking", "hasPilot", "hasAlloy",
+    "hasElWindows", "hasElSeats", "hasHeadupDisplay", "hasIsofix", "hasClimateControl", "hasRainSensor",
+    "hasSunroof", "hasSeatHeat", "hasFullLeather", "hasBluetooth", "hasAppleCarPlay", "hasAndroidAuto",
+    "hasHeatedSteeringWheel", "hasParkingCamera", "hasBlindSpotDetection", "hasLaneKeepingAssist",
+    "hasLedHeadlights", "has_360_camera", "hasEmergencyBreaking", "hasKeylessGo", "hasUsbPort",
+    "hasDistanceControl", "hasHeatPump",
+]  # fmt: skip
+
+# CarSearchInput keys that identify the brand/model - already expressed in
+# the URL path itself, so build_filtered_search_url() skips them rather
+# than also emitting them as (redundant, and untested) query params.
+_CAR_SEARCH_INPUT_PATH_KEYS = frozenset({"brand", "carModel", "brandsModels"})
+
+_CAMEL_CASE_BOUNDARY_RE = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _camel_to_snake(name: str) -> str:
+    """CarSearchInput's GraphQL field names (camelCase, e.g. "sellerKind")
+    to the s[...] query param convention (snake_case, e.g. "seller_kind") -
+    confirmed to just be a straightforward conversion for every field
+    tried. A few fields (e.g. "has_4wd") are already snake_case in
+    CarSearchInput itself; this is idempotent for those (no uppercase
+    letters to convert)."""
+    return _CAMEL_CASE_BOUNDARY_RE.sub("_", name).lower()
+
 
 _RSC_RESULTS_INFO_RE = re.compile(r'"resultsInfo":"([^"]*)"')
 _RSC_PAGINATION_RE = re.compile(r'"pagination":\{"currentPage":(\d+),"lastPage":(true|false)')
 _RSC_LISTING_ID_RE = re.compile(r',"(\d{6,7})",\{"children"')
 _RSC_TOTAL_FROM_RESULTS_INFO_RE = re.compile(r"von ([\d’']+) ")
+_RSC_REDIRECT_RE = re.compile(r'"digest":"NEXT_REDIRECT;replace;([^;]+);(\d+);"')
 
 GRAPHQL_ENDPOINT_PATH = "/graphql"
 
@@ -851,35 +915,30 @@ def build_filtered_search_url(
     domain_cfg: DomainConfig,
     make_key: str,
     model_key: str,
+    car_search_input: dict[str, Any],
     *,
-    price_from: int | None = None,
-    price_to: int | None = None,
-    mileage_from: int | None = None,
-    mileage_to: int | None = None,
-    year_from: int | None = None,
-    year_to: int | None = None,
     page: int = 1,
 ) -> str:
-    """Build the canonical (redirect-free) filtered search URL: max price as
-    the /mp-unter-{price}-chf path segment, everything else as sorted
-    s[...] query params - see the section docstring above for how this was
-    derived."""
-    path_parts = [domain_cfg.locale, domain_cfg.cars_path, make_key, model_key]
-    if price_to is not None:
-        path_parts.append(f"mp-unter-{price_to}-chf")
-    path = "/".join(quote(seg, safe="") for seg in path_parts)
+    """Build a filtered search URL from a CarSearchInput-shaped dict (see
+    build_car_search_input()): every filter becomes a sorted s[...] query
+    param, uniformly - even ones AutoUncle happens to canonicalize into an
+    SEO slug (confirmed for max price, single fuel type, single body type).
+    fetch_rsc_page() follows the server's own embedded redirect to whatever
+    canonical form it wants, so this function doesn't try to replicate
+    that logic - see the section docstring above."""
+    path = "/".join(quote(seg, safe="") for seg in (domain_cfg.locale, domain_cfg.cars_path, make_key, model_key))
 
-    filters = {
-        "price_from": price_from,
-        "mileage_from": mileage_from,
-        "mileage_to": mileage_to,
-        "year_from": year_from,
-        "year_to": year_to,
-    }
     query_params: list[tuple[str, str]] = []
-    for name, value in filters.items():
-        if value is not None:
-            query_params.append((f"s[{_FILTER_QUERY_PARAM_NAMES[name]}]", str(value)))
+    for key, value in car_search_input.items():
+        if key in _CAR_SEARCH_INPUT_PATH_KEYS or value is None:
+            continue
+        snake_key = _camel_to_snake(key)
+        if isinstance(value, (list, tuple, set)):
+            query_params.extend((f"s[{snake_key}][]", str(v)) for v in value)
+        elif isinstance(value, bool):
+            query_params.append((f"s[{snake_key}]", "true" if value else "false"))
+        else:
+            query_params.append((f"s[{snake_key}]", str(value)))
     if page > 1:
         query_params.append(("page", str(page)))
     query_params.sort(key=lambda kv: kv[0])
@@ -891,9 +950,22 @@ def build_filtered_search_url(
     return url
 
 
-def fetch_rsc_page(url: str, *, session: requests.Session) -> str:
+def fetch_rsc_page(url: str, *, session: requests.Session, _redirects_followed: int = 0) -> str:
+    """Fetch a search-result URL's RSC ("Flight") payload. Follows an
+    embedded "soft" redirect (see the section docstring above) to whatever
+    canonical URL AutoUncle wants, bounded to avoid a loop - real
+    canonicalization has never been observed to chain more than one hop,
+    so hitting this bound at all likely means something unexpected is
+    going on, not a legitimate long redirect chain."""
     resp = request_with_retries(session, "GET", url, headers={"RSC": "1"})
-    return resp.text
+    text = resp.text
+    redirect_m = _RSC_REDIRECT_RE.search(text)
+    if redirect_m and _redirects_followed < 5:
+        target = redirect_m.group(1)
+        target_url = target if target.startswith("http") else f"https://{urlsplit(url).netloc}{target}"
+        logger.debug("  RSC redirect -> %s", target_url)
+        return fetch_rsc_page(target_url, session=session, _redirects_followed=_redirects_followed + 1)
+    return text
 
 
 def parse_rsc_pagination(rsc_text: str) -> dict[str, Any]:
@@ -936,6 +1008,17 @@ def parse_rsc_listing_ids(rsc_text: str) -> list[str]:
     return ids
 
 
+def _validate_choice(name: str, value: str, allowed: list[str]) -> None:
+    if value not in allowed:
+        raise ValueError(f"{name} {value!r} is not one of {allowed}")
+
+
+def _validate_choices(name: str, values: Iterable[str], allowed: list[str]) -> None:
+    for value in values:
+        if value not in allowed:
+            raise ValueError(f"{name} {value!r} is not one of {allowed}")
+
+
 def build_car_search_input(
     make_key: str,
     model_key: str,
@@ -946,10 +1029,51 @@ def build_car_search_input(
     mileage_to: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    body_types: Iterable[str] | None = None,
+    fuel_types: Iterable[str] | None = None,
+    colors: Iterable[str] | None = None,
+    doors: int | None = None,
+    seller_kind: str | None = None,
+    one_owner: bool | None = None,
+    equipment: Iterable[str] | None = None,
+    extra_filters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build the CarSearchInput GraphQL variable object used by
-    count_cars(). Field names confirmed live by monkey-patching
-    window.fetch and driving the real filter form one control at a time."""
+    """Build the CarSearchInput GraphQL variable object used by both
+    count_cars() and (via _camel_to_snake()) build_filtered_search_url().
+    Field names confirmed live, one at a time, by calling countCars()
+    directly with a candidate name/value and reading whether the server
+    accepted it or said "Field is not defined on CarSearchInput" (GraphQL
+    introspection is disabled in production) - see the "Filtered search"
+    section docstring above for the confirmed field list, and
+    docs/REFERENCE.md for the full table.
+
+    body_types/fuel_types/colors/seller_kind/equipment are validated
+    against AutoUncle's own known vocabulary (BODY_TYPES, FUEL_TYPES,
+    COLORS, SELLER_KINDS, EQUIPMENT_OPTIONS) and raise ValueError listing
+    the valid options otherwise, rather than silently sending a value the
+    server would just ignore or 0-result on.
+
+    extra_filters is a passthrough dict (merged in as-is, CarSearchInput
+    field names) for any confirmed field without its own parameter here -
+    euroEmissionClass, notLeasing, notDamaged, minElectricDriveRange/
+    maxElectricDriveRange, minBatteryCapacity/maxBatteryCapacity,
+    minEnergyConsumption/maxEnergyConsumption, maxFuelEconomy - or any
+    field this module doesn't know about yet."""
+    if body_types is not None:
+        body_types = list(body_types)
+        _validate_choices("body_types", body_types, BODY_TYPES)
+    if fuel_types is not None:
+        fuel_types = list(fuel_types)
+        _validate_choices("fuel_types", fuel_types, FUEL_TYPES)
+    if colors is not None:
+        colors = list(colors)
+        _validate_choices("colors", colors, COLORS)
+    if seller_kind is not None:
+        _validate_choice("seller_kind", seller_kind, SELLER_KINDS)
+    if equipment is not None:
+        equipment = list(equipment)
+        _validate_choices("equipment", equipment, EQUIPMENT_OPTIONS)
+
     car_search: dict[str, Any] = {
         "brand": make_key,
         "carModel": model_key,
@@ -967,6 +1091,22 @@ def build_car_search_input(
         car_search["minYear"] = year_from
     if year_to is not None:
         car_search["maxYear"] = year_to
+    if body_types:
+        car_search["bodyTypes"] = body_types
+    if fuel_types:
+        car_search["fuelTypes"] = fuel_types
+    if colors:
+        car_search["colors"] = colors
+    if doors is not None:
+        car_search["doors"] = doors
+    if seller_kind is not None:
+        car_search["sellerKind"] = seller_kind
+    if one_owner is not None:
+        car_search["isOneOwner"] = one_owner
+    for flag in equipment or ():
+        car_search[flag] = True
+    if extra_filters:
+        car_search.update(extra_filters)
     return car_search
 
 
@@ -1005,40 +1145,25 @@ def search_listings_filtered(
     make_key: str,
     model_key: str,
     domain_cfg: DomainConfig,
+    car_search_input: dict[str, Any],
     *,
     session: requests.Session,
-    price_from: int | None = None,
-    price_to: int | None = None,
-    mileage_from: int | None = None,
-    mileage_to: int | None = None,
-    year_from: int | None = None,
-    year_to: int | None = None,
     delay: float = 0.4,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """Collect every listing id matching a price/mileage/year filter, via
-    the RSC mechanism described in the section docstring above. Unlike
-    search_listings() (the unfiltered/JSON-LD path), each returned dict only
-    has an "id" key - RSC carries no rich per-listing summary fields, so the
-    detail phase (visit_all_listings()) is what fills in everything else."""
+    """Collect every listing id matching a CarSearchInput-shaped filter dict
+    (see build_car_search_input()), via the RSC mechanism described in the
+    section docstring above. Unlike search_listings() (the unfiltered/
+    JSON-LD path), each returned dict only has an "id" key - RSC carries no
+    rich per-listing summary fields, so the detail phase
+    (visit_all_listings()) is what fills in everything else."""
     listings: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     page = 1
     last_page = False
 
     while not last_page:
-        url = build_filtered_search_url(
-            domain_cfg,
-            make_key,
-            model_key,
-            price_from=price_from,
-            price_to=price_to,
-            mileage_from=mileage_from,
-            mileage_to=mileage_to,
-            year_from=year_from,
-            year_to=year_to,
-            page=page,
-        )
+        url = build_filtered_search_url(domain_cfg, make_key, model_key, car_search_input, page=page)
         rsc_text = fetch_rsc_page(url, session=session)
         pagination = parse_rsc_pagination(rsc_text)
         ids = parse_rsc_listing_ids(rsc_text)
@@ -1220,6 +1345,14 @@ def scrape(
     mileage_to: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    body_types: Iterable[str] | None = None,
+    fuel_types: Iterable[str] | None = None,
+    colors: Iterable[str] | None = None,
+    doors: int | None = None,
+    seller_kind: str | None = None,
+    one_owner: bool | None = None,
+    equipment: Iterable[str] | None = None,
+    extra_filters: dict[str, Any] | None = None,
     max_results: int | None = None,
     delay: float = 0.4,
     verbose: bool = True,
@@ -1250,6 +1383,24 @@ def scrape(
         price_from/price_to: Optional price range in CHF (inclusive).
         mileage_from/mileage_to: Optional mileage range in km (inclusive).
         year_from/year_to: Optional first-registration year range (inclusive).
+        body_types: Optional list of body types, e.g. ["SUV", "Cabriolet"] - see BODY_TYPES.
+        fuel_types: Optional list of fuel types, e.g. ["Diesel", "El"] - see FUEL_TYPES.
+        colors: Optional list of colors, e.g. ["Black", "White"] - see COLORS.
+        doors: Optional exact door count, e.g. 5 (not a range - AutoUncle doesn't
+            expose min/max doors, only an exact match).
+        seller_kind: Optional "Dealer" or "Private" - see SELLER_KINDS.
+        one_owner: Optional bool - only-one-previous-owner listings if True.
+        equipment: Optional list of equipment flags a listing must have, e.g.
+            ["hasGps", "hasAppleCarPlay"] - see EQUIPMENT_OPTIONS for all ~30
+            recognized flags. Combines with AND (a listing must have all of them).
+        extra_filters: Optional passthrough dict of any other confirmed
+            CarSearchInput field not given its own parameter above -
+            euroEmissionClass, notLeasing, notDamaged, minElectricDriveRange/
+            maxElectricDriveRange, minBatteryCapacity/maxBatteryCapacity,
+            minEnergyConsumption/maxEnergyConsumption, maxFuelEconomy - see the
+            "Filtered search" section docstring and docs/REFERENCE.md for the
+            confirmed field list. Merged directly into the CarSearchInput sent
+            to AutoUncle, so use the exact GraphQL field names (camelCase).
         max_results: If given, keep only this many listings - the ones most
             recently posted to AutoUncle first ("firstSeenAt" descending;
             listings without a known timestamp sort last). Requires
@@ -1293,9 +1444,22 @@ def scrape(
                 "every matching listing's detail page."
             )
 
+    # Validated here (before any network call), same as the range checks
+    # above - build_car_search_input() (called later) validates these too,
+    # but only after make/model have already been resolved over the network.
+    if body_types is not None:
+        _validate_choices("body_types", body_types, BODY_TYPES)
+    if fuel_types is not None:
+        _validate_choices("fuel_types", fuel_types, FUEL_TYPES)
+    if colors is not None:
+        _validate_choices("colors", colors, COLORS)
+    if seller_kind is not None:
+        _validate_choice("seller_kind", seller_kind, SELLER_KINDS)
+    if equipment is not None:
+        _validate_choices("equipment", equipment, EQUIPMENT_OPTIONS)
+
     domain_cfg = get_domain_config(domain)
     session = session or make_session()
-    filtered = any(v is not None for v in (price_from, price_to, mileage_from, mileage_to, year_from, year_to))
 
     if verbose:
         logger.info("Resolving make %r ...", make)
@@ -1310,6 +1474,26 @@ def scrape(
     if verbose:
         logger.info("  -> model %r", model_key)
 
+    car_search_input = build_car_search_input(
+        make_key,
+        model_key,
+        price_from=price_from,
+        price_to=price_to,
+        mileage_from=mileage_from,
+        mileage_to=mileage_to,
+        year_from=year_from,
+        year_to=year_to,
+        body_types=body_types,
+        fuel_types=fuel_types,
+        colors=colors,
+        doors=doors,
+        seller_kind=seller_kind,
+        one_owner=one_owner,
+        equipment=equipment,
+        extra_filters=extra_filters,
+    )
+    filtered = any(k not in _CAR_SEARCH_INPUT_PATH_KEYS for k in car_search_input)
+
     if verbose:
         active_filters = []
         if price_from is not None or price_to is not None:
@@ -1318,6 +1502,22 @@ def scrape(
             active_filters.append(f"mileage {mileage_from or 0}-{mileage_to or '∞'} km")
         if year_from is not None or year_to is not None:
             active_filters.append(f"year {year_from or '…'}-{year_to or '…'}")
+        for label, value in (
+            ("body types", body_types),
+            ("fuel types", fuel_types),
+            ("colors", colors),
+            ("equipment", equipment),
+        ):
+            if value:
+                active_filters.append(f"{label} {list(value)}")
+        if doors is not None:
+            active_filters.append(f"doors {doors}")
+        if seller_kind is not None:
+            active_filters.append(f"seller {seller_kind}")
+        if one_owner is not None:
+            active_filters.append(f"one owner {one_owner}")
+        if extra_filters:
+            active_filters.append(f"extra {extra_filters}")
         filter_note = f" [filters: {', '.join(active_filters)}]" if active_filters else ""
         logger.info("Fetching listings for %s %s (autouncle.%s)%s ...", make_key, model_key, domain, filter_note)
 
@@ -1326,13 +1526,8 @@ def scrape(
             make_key,
             model_key,
             domain_cfg,
+            car_search_input,
             session=session,
-            price_from=price_from,
-            price_to=price_to,
-            mileage_from=mileage_from,
-            mileage_to=mileage_to,
-            year_from=year_from,
-            year_to=year_to,
             delay=delay,
             verbose=verbose,
         )
@@ -1384,6 +1579,10 @@ def scrape(
 # ============================================================
 
 
+def _csv_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Scrape autouncle.ch listings for a given make/model.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -1424,6 +1623,41 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mileage-to", type=int, default=None, help="Maximum mileage in km (inclusive).")
     parser.add_argument("--year-from", type=int, default=None, help="Earliest first-registration year (inclusive).")
     parser.add_argument("--year-to", type=int, default=None, help="Latest first-registration year (inclusive).")
+    parser.add_argument(
+        "--body-types",
+        type=_csv_list,
+        default=None,
+        help=f"Comma-separated body types, e.g. 'SUV,Coupe'. One of: {', '.join(BODY_TYPES)}",
+    )
+    parser.add_argument(
+        "--fuel-types",
+        type=_csv_list,
+        default=None,
+        help=f"Comma-separated fuel types, e.g. 'Diesel,El'. One of: {', '.join(FUEL_TYPES)}",
+    )
+    parser.add_argument(
+        "--colors",
+        type=_csv_list,
+        default=None,
+        help=f"Comma-separated colors, e.g. 'Black,White'. One of: {', '.join(COLORS)}",
+    )
+    parser.add_argument("--doors", type=int, default=None, help="Exact door count, e.g. 5 (not a range).")
+    parser.add_argument(
+        "--seller-kind",
+        default=None,
+        choices=SELLER_KINDS,
+        help="Restrict to dealer or private sellers.",
+    )
+    parser.add_argument(
+        "--one-owner", action="store_true", help="Only listings with a single previous owner (isOneOwner)."
+    )
+    parser.add_argument(
+        "--equipment",
+        type=_csv_list,
+        default=None,
+        help="Comma-separated equipment flags a listing must all have, e.g. 'hasGps,hasAppleCarPlay'. "
+        "See docs/REFERENCE.md for the full list of ~30 recognized flags.",
+    )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
         "-v", "--verbose", action="store_true", help="Show debug-level detail, including every HTTP request made."
@@ -1480,6 +1714,13 @@ def main(argv: list[str] | None = None) -> int:
         mileage_to=args.mileage_to,
         year_from=args.year_from,
         year_to=args.year_to,
+        body_types=args.body_types,
+        fuel_types=args.fuel_types,
+        colors=args.colors,
+        doors=args.doors,
+        seller_kind=args.seller_kind,
+        one_owner=args.one_owner or None,  # --one-owner is store_true (default False); False means "unset" here
+        equipment=args.equipment,
         max_results=args.max_results,
         delay=args.delay,
         verbose=True,

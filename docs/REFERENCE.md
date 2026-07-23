@@ -38,7 +38,7 @@ was tried and ruled out, is in the module docstring of
 |---|---|---|
 | Brand/model reference data | `GET /api/v4/car_search_form/config` — a public, unauthenticated REST endpoint | `fetch_search_form_config()`, `resolve_make_key()`, `resolve_model_key()` |
 | Unfiltered search (no price/mileage/year filter) | schema.org JSON-LD on the canonical, paginated brand/model page | `search_listings()`, `parse_vehicle_jsonld()` |
-| Filtered search (any price/mileage/year filter) | Next.js RSC ("Flight") response, fetched from a URL built from the confirmed max-price-slug + sorted `s[...]` query-param rule | `build_filtered_search_url()`, `fetch_rsc_page()`, `parse_rsc_pagination()`, `parse_rsc_listing_ids()`, `search_listings_filtered()` |
+| Filtered search (price/mileage/year/body type/fuel type/colors/doors/seller kind/equipment/...) | Next.js RSC ("Flight") response, fetched from a URL of plain `s[...]` query params - the server's own embedded redirect handles turning some of those into an SEO slug | `build_filtered_search_url()`, `fetch_rsc_page()`, `parse_rsc_pagination()`, `parse_rsc_listing_ids()`, `search_listings_filtered()` |
 | Listing detail | JSON-LD on the detail page, plus a BeautifulSoup pass over the same page for gallery/equipment/source-listing | `fetch_detail()`, `parse_detail_jsonld()`, `extract_gallery_images()`, `extract_equipment()`, `extract_source_listing()` |
 | Fast match count (optional) | AutoUncle's own GraphQL `countCars` query | `count_cars()`, `build_car_search_input()` |
 
@@ -54,49 +54,82 @@ everything else via the detail phase (`detail=True`, the default).
 
 ### The filtered-search URL rule
 
-Also confirmed empirically, by monkey-patching `window.fetch` and driving
-AutoUncle's real filter form one control at a time (see
-[CONTRIBUTING.md](../CONTRIBUTING.md) for the technique, if this needs
+Confirmed empirically two ways: by monkey-patching `window.fetch` and
+driving AutoUncle's real filter form one control at a time, and by probing
+the GraphQL `countCars` query directly with candidate field names (see
+[CONTRIBUTING.md](../CONTRIBUTING.md) for both techniques, if this needs
 re-deriving):
 
-- **Max price** canonicalizes into an SEO path segment:
-  `/{brand}/{model}/mp-unter-{price}-chf` ("mp" = max price, German
-  "unter" = "under").
-- **Every other filter** (min price, min/max km, min/max year) is a
-  Rails-style nested query parameter: `s[min_price]`, `s[min_km]`,
-  `s[max_km]`, `s[min_year]`, `s[max_year]`.
-- The canonical parameter order is those query keys **sorted
-  alphabetically**. A non-canonical order (or an un-canonicalized
-  max-price-as-query-param form) doesn't 404 — AutoUncle 200s with a
-  Next.js redirect encoded *inside* the RSC response body itself
-  (`NEXT_REDIRECT;replace;<canonical-url>;308;`), not a real HTTP 3xx.
-  `build_filtered_search_url()` builds the canonical form directly, so this
-  redirect is never actually triggered by this scraper.
+- **Every filter** is a Rails-style nested query parameter on the plain
+  search URL: `s[min_price]`, `s[body_types][]`, `s[has_gps]`, etc. - the
+  snake_case key is just the `CarSearchInput` field name (see below)
+  converted by `_camel_to_snake()`; array-valued filters repeat the same
+  `s[key][]=` key once per value.
+- AutoUncle canonicalizes **some** single-value filters into an SEO path
+  segment instead of leaving them as query params - confirmed for max price
+  (`/mp-unter-{price}-chf`, "mp" = max price, German "unter" = "under"), a
+  single fuel type (`/f-{fuel}`), and a single body type (`/b-{bodytype}`) -
+  and sorts query keys alphabetically. Requesting the plain/unsorted form
+  doesn't 404 - AutoUncle 200s with a redirect encoded *inside* the RSC
+  response body itself (`NEXT_REDIRECT;replace;<canonical-url>;<code>;`),
+  not a real HTTP 3xx.
+- Rather than replicating AutoUncle's canonicalization rules by hand (there
+  could be more not yet found), **`fetch_rsc_page()` follows that embedded
+  redirect itself**, bounded to 5 hops. `build_filtered_search_url()`
+  therefore always emits the plain, uniform query-param form for every
+  filter and lets the server decide the canonical URL - this is simpler and
+  more robust than trying to track every SEO-slug rule AutoUncle might have.
 
-This was validated against 4 independent real captures spanning single- and
-multi-filter combinations (5 to 903 total results, pages 1 and 2, with and
-without a max-price slug) with zero listing-id overlap across pages in
-every case, and against one full live paginated run (903/903 listings
-collected across 37 pages, exactly matching a live `count_cars()` call).
+This was validated against many real captures spanning single- and
+multi-filter combinations across price/km/year/body type/fuel type/doors/
+colors/seller kind/equipment (0 to 2000+ total results, multiple pages)
+with zero listing-id overlap across pages in every case, and against
+several full live runs cross-checked against `count_cars()` (exact matches
+every time, including a 903-listing run across 37 pages and a redirect
+followed live end-to-end for a max-price filter).
 
-### `CarSearchInput` (GraphQL) — confirmed vs. presumed fields
+### `CarSearchInput` (GraphQL) — confirmed vs. not-found fields
 
-Confirmed live, one field at a time, by watching the exact request body
-AutoUncle's own filter form sends:
+GraphQL introspection (`__schema`) is disabled in production, so every
+field below was confirmed the hard way: calling `countCars()` directly with
+a candidate field name/value and reading whether the server accepted it or
+returned `"Field is not defined on CarSearchInput"`.
 
-| Field | Confirmed |
-|---|---|
-| `brand`, `carModel` | ✅ |
-| `brandsModels: [{brand, modelName, equipmentVariants}]` | ✅ |
-| `maxPrice`, `minPrice` | ✅ |
-| `minKm`, `maxKm` | ✅ |
-| `minYear`, `maxYear` | ✅ |
+| Field | Type | Notes |
+|---|---|---|
+| `brand`, `carModel` | `string` | |
+| `brandsModels` | `[{brand, modelName, equipmentVariants}]` | |
+| `minPrice`/`maxPrice` | `int` (CHF) | |
+| `minKm`/`maxKm` | `int` | |
+| `minYear`/`maxYear` | `int` | |
+| `bodyTypes` | `[string]` | see `BODY_TYPES` |
+| `fuelTypes` | `[string]` | see `FUEL_TYPES` |
+| `colors` | `[string]` | see `COLORS` |
+| `doors` | `int` | **exact match**, not a range - no `minDoors`/`maxDoors` found |
+| `sellerKind` | `string` | see `SELLER_KINDS` - **singular**, one value at a time, not a list |
+| `euroEmissionClass` | `int` (1-6) | data coverage for CH listings seemed sparse when tested - a 0 count for a common class like 6 isn't necessarily a bug |
+| `isOneOwner` | `bool` | |
+| `notLeasing` | `bool` | config's own default for this is `true` |
+| `notDamaged` | `bool` | config's own default for this is `false` |
+| `minElectricDriveRange`/`maxElectricDriveRange` | `int` (km) | |
+| `minBatteryCapacity`/`maxBatteryCapacity` | `int` (kWh) | |
+| `minEnergyConsumption`/`maxEnergyConsumption` | `int` (kWh/100km) | |
+| `maxFuelEconomy` | `float` (L/100km) | **no `minFuelEconomy`** found - confirmed one-directional |
+| every string in `EQUIPMENT_OPTIONS` (~30 flags) | `bool` | each is its **own top-level field**, e.g. `hasGps: true` - not a single `equipment: [...]` list |
 
-GraphQL introspection (`__schema`) is disabled in production, so this list
-is confirmed-by-observation, not from a schema dump — `CarSearchInput` may
-have additional fields (fuel type, body type, equipment, ...) that were
-never exercised. `build_car_search_input()` only ever sets the confirmed
-fields above.
+**Tried and not found** under any reasonable name: seats, transmission/gear,
+region, price rating, emission label, days-on-sale, horsepower. These may
+not be supported by `CarSearchInput` at all, or use a name not yet guessed
+— see [CONTRIBUTING.md](../CONTRIBUTING.md) if you want to keep looking.
+
+`build_car_search_input()` validates `body_types`/`fuel_types`/`colors`/
+`seller_kind`/`equipment` against the known vocabulary above and raises
+`ValueError` (listing the valid options) for anything else, rather than
+silently sending AutoUncle a value it would just ignore or 0-result on.
+Anything confirmed above without its own named parameter (`euroEmissionClass`,
+`notLeasing`, `notDamaged`, the EV range fields, `maxFuelEconomy`) goes
+through `extra_filters` - a plain passthrough dict merged in as-is (use the
+exact GraphQL field names, camelCase).
 
 ## `scrape()` signature
 
@@ -114,6 +147,14 @@ def scrape(
     mileage_to: int | None = None,   # km, inclusive
     year_from: int | None = None,    # first-registration year, inclusive
     year_to: int | None = None,      # first-registration year, inclusive
+    body_types: Iterable[str] | None = None,   # see BODY_TYPES
+    fuel_types: Iterable[str] | None = None,   # see FUEL_TYPES
+    colors: Iterable[str] | None = None,       # see COLORS
+    doors: int | None = None,                  # exact match, not a range
+    seller_kind: str | None = None,            # see SELLER_KINDS - singular
+    one_owner: bool | None = None,
+    equipment: Iterable[str] | None = None,    # see EQUIPMENT_OPTIONS - AND semantics
+    extra_filters: dict | None = None,         # passthrough for any other confirmed CarSearchInput field
     max_results: int | None = None,  # keep only this many, newest (`firstSeenAt`) first - requires detail=True
     delay: float = 0.4,              # seconds between HTTP requests
     verbose: bool = True,            # emit progress via the "autouncle_scraper" logger at INFO level
@@ -266,10 +307,13 @@ AutoUncle changes something, roughly in order of fragility:
    Flight wire format, which is framework-internal and not a stable public
    contract. `parse_rsc_listing_ids()` raises `RuntimeError` rather than
    silently returning nothing if this ever breaks (see its docstring).
-3. **`CarSearchInput`'s presumed-complete field list** — only the fields
-   actually exercised (see the table above) are confirmed; a redesign of
-   AutoUncle's filter UI could add/rename fields this scraper doesn't know
-   about.
+3. **`CarSearchInput`'s field list is confirmed-by-probing, not exhaustive**
+   — the table above covers everything tried (including all ~30 equipment
+   flags, which weren't individually tested but follow one confirmed,
+   consistent pattern), but a redesign of AutoUncle's filter UI could
+   add/rename fields this scraper doesn't know about, and a few plausible
+   ones (seats, transmission, region) were tried and never found under any
+   reasonable name.
 4. **`dealerName`/`description`/`vin`** always returning `None` — this
    reflects every listing checked at the time of writing, not a guarantee
    that AutoUncle never renders these for any listing.

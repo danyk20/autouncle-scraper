@@ -89,6 +89,20 @@ class TestScrapeValidation:
         with pytest.raises(ValueError, match="cannot be greater than"):
             au.scrape("VW", "Golf", **kwargs)
 
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"body_types": ["NotARealBodyType"]},
+            {"fuel_types": ["NotARealFuel"]},
+            {"colors": ["Chartreuse"]},
+            {"seller_kind": "Robot"},
+            {"equipment": ["hasFlyingCarMode"]},
+        ],
+    )
+    def test_invalid_vocab_filter_raises_before_any_network_call(self, kwargs):
+        with pytest.raises(ValueError):
+            au.scrape("VW", "Golf", **kwargs)
+
 
 class TestScrapeUnfiltered:
     @responses.activate
@@ -148,7 +162,7 @@ class TestScrapeFiltered:
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
-            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf/mp-unter-5000-chf",
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf?s%5Bmax_price%5D=5000",
             body=load_fixture("rsc_vw_golf_mp5000_page1.txt"),
             status=200,
         )
@@ -162,7 +176,7 @@ class TestScrapeFiltered:
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
-            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf/mp-unter-5000-chf",
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf?s%5Bmax_price%5D=5000",
             body=load_fixture("rsc_vw_golf_mp5000_page1.txt"),
             status=200,
         )
@@ -205,6 +219,41 @@ class TestScrapeFiltered:
         assert "year 2015-2020" in caplog.text
 
     @responses.activate
+    def test_new_filter_dimensions_logged_verbosely(self, search_form_config, no_sleep, caplog):
+        import logging
+
+        caplog.set_level(logging.INFO, logger="autouncle_scraper")
+        _mock_config(search_form_config)
+        responses.add(
+            responses.GET,
+            re.compile(r"https://www\.autouncle\.ch/de-ch/gebrauchtwagen/VW/Golf.*"),
+            body='"resultsInfo":"Zeige 0 - 0 von 0 Resultate","pagination":{"currentPage":1,"lastPage":true}',
+            status=200,
+        )
+        au.scrape(
+            "VW",
+            "Golf",
+            body_types=["SUV"],
+            fuel_types=["Diesel"],
+            colors=["Black"],
+            doors=5,
+            seller_kind="Dealer",
+            one_owner=True,
+            equipment=["hasGps"],
+            extra_filters={"euroEmissionClass": 6},
+            detail=False,
+            verbose=True,
+        )
+        assert "body types ['SUV']" in caplog.text
+        assert "fuel types ['Diesel']" in caplog.text
+        assert "colors ['Black']" in caplog.text
+        assert "equipment ['hasGps']" in caplog.text
+        assert "doors 5" in caplog.text
+        assert "seller Dealer" in caplog.text
+        assert "one owner True" in caplog.text
+        assert "extra {'euroEmissionClass': 6}" in caplog.text
+
+    @responses.activate
     def test_filtered_no_detail_logs_warning(self, search_form_config, no_sleep, caplog):
         import logging
 
@@ -212,7 +261,7 @@ class TestScrapeFiltered:
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
-            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf/mp-unter-5000-chf",
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf?s%5Bmax_price%5D=5000",
             body=load_fixture("rsc_vw_golf_mp5000_page1.txt"),
             status=200,
         )

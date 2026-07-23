@@ -73,13 +73,22 @@ command is `autouncle-scraper --make VW --model Golf`.
 | `--price-from` / `--price-to` | Filter by price in CHF (inclusive, either end optional) |
 | `--mileage-from` / `--mileage-to` | Filter by mileage in km (inclusive, either end optional) |
 | `--year-from` / `--year-to` | Filter by first-registration year (inclusive, either end optional) |
+| `--body-types` | Comma-separated body types, e.g. `SUV,Coupe` — see `BODY_TYPES` |
+| `--fuel-types` | Comma-separated fuel types, e.g. `Diesel,El` — see `FUEL_TYPES` |
+| `--colors` | Comma-separated colors, e.g. `Black,White` — see `COLORS` |
+| `--doors` | Exact door count, e.g. `5` (not a range — AutoUncle has no min/max doors) |
+| `--seller-kind` | `Dealer` or `Private` |
+| `--one-owner` | Only listings with a single previous owner |
+| `--equipment` | Comma-separated equipment flags a listing must all have, e.g. `hasGps,hasAppleCarPlay` — see [docs/REFERENCE.md](docs/REFERENCE.md) for all ~30 recognized flags |
 | `--max-results` | Keep only this many listings, most recently posted first (requires detail — see below) |
 | `-v` / `--verbose` | Also show debug-level detail, including every HTTP request (mutually exclusive with `-q`) |
 | `-q` / `--quiet` | Suppress progress output; only warnings/errors (mutually exclusive with `-v`) |
 
 Filters combine with AND and are applied server-side. A mistyped make/model
 prints a clean error (plus, for an unknown model, the list of valid models)
-instead of crashing.
+instead of crashing; an invalid `--body-types`/`--fuel-types`/`--colors`/
+`--seller-kind`/`--equipment` value does the same (listing the valid options),
+rather than silently sending AutoUncle a value it would just ignore.
 
 ```bash
 # Fast mode: search results only, skip per-listing detail
@@ -90,7 +99,16 @@ pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --price-to 
 
 # Only the 20 most recently posted matches
 pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --max-results 20
+
+# Diesel SUVs with a rear-view camera, from a dealer, one owner
+pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" \
+  --fuel-types Diesel --body-types SUV --equipment hasParkingCamera --seller-kind Dealer --one-owner
 ```
+
+Beyond the flags above, the library's `scrape()` also takes an
+`extra_filters` dict for any other confirmed server-side field without its
+own CLI flag (`euroEmissionClass`, `notLeasing`, `notDamaged`, EV range
+filters, `maxFuelEconomy`) — see [docs/REFERENCE.md](docs/REFERENCE.md).
 
 **One honest asymmetry vs. AutoScout24**: unfiltered searches use
 schema.org JSON-LD, which is already fairly rich even without `--no-detail`.

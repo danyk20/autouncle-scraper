@@ -72,6 +72,28 @@ a redesign. To re-derive them:
 5. For BeautifulSoup selectors: prefer stable `data-*` attributes or
    structural shape (e.g. "an `<li>` with exactly two `<span>` children")
    over CSS class names, which are build-hashed and change on every deploy.
+6. **For confirming/discovering `CarSearchInput` fields specifically**, this
+   doesn't require a browser at all — GraphQL introspection is disabled in
+   production, but a candidate field name/value can just be tried directly
+   against the live endpoint:
+   ```bash
+   curl -s -X POST https://www.autouncle.ch/graphql \
+     -H 'Content-Type: application/json' \
+     -d '{"query":"query countCars($carSearch: CarSearchInput!) { countCars(carSearch: $carSearch) }",
+          "variables":{"carSearch":{"brand":"VW","carModel":"Golf VIII","candidateField":123}}}'
+   ```
+   A wrong guess returns a clear `"Field is not defined on CarSearchInput"`
+   error; a right one just returns a count. This is how every field in
+   `docs/REFERENCE.md`'s `CarSearchInput` table was confirmed - much faster
+   than driving the UI when you already have a guess to try (informed by
+   `/api/v4/car_search_form/config`'s own key names, e.g. `bodyTypes` from
+   its `bodyTypes` list, `sellerKind` from `sellerKinds`, each
+   `equipmentOptions` string as its own top-level boolean field).
+7. Whatever you confirm via `countCars()`, also check it works through
+   `search_listings_filtered()`/`build_filtered_search_url()` (the RSC path
+   that actually returns listings, not just a count) — a field CarSearchInput
+   accepts isn't guaranteed to also be a working `s[...]` query param under
+   the same snake_case name, though every field tried so far has been.
 
 ## Questions / bug reports
 

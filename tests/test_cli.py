@@ -83,6 +83,19 @@ class TestBuildArgParser:
                 "2015",
                 "--year-to",
                 "2020",
+                "--body-types",
+                "SUV,Coupe",
+                "--fuel-types",
+                "Diesel",
+                "--colors",
+                "Black, White",
+                "--doors",
+                "5",
+                "--seller-kind",
+                "Dealer",
+                "--one-owner",
+                "--equipment",
+                "hasGps,hasAppleCarPlay",
                 "--max-results",
                 "10",
                 "-v",
@@ -94,6 +107,13 @@ class TestBuildArgParser:
         assert args.delay == 1.5
         assert args.price_from == 1000
         assert args.price_to == 5000
+        assert args.body_types == ["SUV", "Coupe"]
+        assert args.fuel_types == ["Diesel"]
+        assert args.colors == ["Black", "White"]  # whitespace around commas is trimmed
+        assert args.doors == 5
+        assert args.seller_kind == "Dealer"
+        assert args.one_owner is True
+        assert args.equipment == ["hasGps", "hasAppleCarPlay"]
         assert args.max_results == 10
         assert args.verbose is True
 
@@ -101,6 +121,22 @@ class TestBuildArgParser:
         parser = au.build_arg_parser()
         args = parser.parse_args(["--make", "VW", "--model", "Golf"])
         assert args.max_results is None
+
+    def test_new_filters_default_to_none_or_false(self):
+        parser = au.build_arg_parser()
+        args = parser.parse_args(["--make", "VW", "--model", "Golf"])
+        assert args.body_types is None
+        assert args.fuel_types is None
+        assert args.colors is None
+        assert args.doors is None
+        assert args.seller_kind is None
+        assert args.one_owner is False
+        assert args.equipment is None
+
+    def test_seller_kind_rejects_invalid_choice(self):
+        parser = au.build_arg_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--make", "VW", "--model", "Golf", "--seller-kind", "Robot"])
 
     def test_verbose_and_quiet_are_mutually_exclusive(self):
         parser = au.build_arg_parser()
@@ -124,6 +160,40 @@ class TestMain:
         assert exit_code == 0
         assert (tmp_path / "custom.csv").exists()
         assert (tmp_path / "custom.json").exists()
+
+    @responses.activate
+    def test_new_filter_flags_reach_scrape(self, search_form_config, no_sleep, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/api/v4/car_search_form/config",
+            json=search_form_config,
+            status=200,
+        )
+        responses.add(
+            responses.GET,
+            re.compile(r"https://www\.autouncle\.ch/de-ch/gebrauchtwagen/VW/Golf.*"),
+            body='"resultsInfo":"Zeige 0 - 0 von 0 Resultate","pagination":{"currentPage":1,"lastPage":true}',
+            status=200,
+        )
+        exit_code = au.main(
+            [
+                "--make",
+                "VW",
+                "--model",
+                "Golf",
+                "--body-types",
+                "SUV",
+                "--seller-kind",
+                "Dealer",
+                "--one-owner",
+                "--no-detail",
+            ]
+        )
+        assert exit_code == 0
+        # 0 matches for this made-up combo is the expected, correctly-plumbed result.
+        with open(tmp_path / "vw_golf.json", encoding="utf-8") as f:
+            assert json.load(f) == []
 
     @responses.activate
     def test_no_detail_skips_detail_visits(self, search_form_config, no_sleep, tmp_path, monkeypatch):
