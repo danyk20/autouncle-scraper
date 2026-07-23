@@ -114,7 +114,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 @dataclass(frozen=True)
@@ -575,9 +575,11 @@ def parse_detail_jsonld(html: str) -> dict[str, Any]:
     "when this listing started being tracked" - there is no dedicated field
     for it anywhere, and no timestamp of any kind in the summary/
     search-result shape (confirmed: neither the unfiltered JSON-LD ItemList
-    items nor the filtered-search RSC payload carry one), so sorting by
-    "newest listing" requires visiting every candidate's detail page first.
-    See scrape()'s `max_results` handling."""
+    items nor the filtered-search RSC payload carry one). That also means
+    true "newest listing" ordering can only be computed after visiting a
+    candidate's detail page - `scrape()`'s `max_results` deliberately does
+    NOT do this (it would defeat the point of a fast, capped search); see
+    its docstring for the speed/completeness trade-off it makes instead."""
     graph = _graph_items(html)
     vehicle = find_vehicle(graph)
     if vehicle is None:
@@ -1401,17 +1403,17 @@ def scrape(
             "Filtered search" section docstring and docs/REFERENCE.md for the
             confirmed field list. Merged directly into the CarSearchInput sent
             to AutoUncle, so use the exact GraphQL field names (camelCase).
-        max_results: If given, keep only this many listings - the ones most
-            recently posted to AutoUncle first ("firstSeenAt" descending;
-            listings without a known timestamp sort last). Requires
-            `detail=True` (the default): there is no "date posted" field
-            anywhere in the summary/search-result data (neither the
-            unfiltered JSON-LD nor the filtered RSC payload carry one), so
-            determining true newest-first order means visiting every
-            matching listing's detail page regardless of `max_results` -
-            this parameter trims the *returned* set, it does not reduce
-            how many detail pages get fetched. Raises ValueError if given
-            together with `detail=False`.
+        max_results: If given, only the first N matching listings (in
+            whatever order AutoUncle's own search returns them) are ever
+            opened - this is what makes the parameter fast: the rest are
+            never fetched at all, unlike a plain client-side truncation
+            after the fact. Trade-off: AutoUncle's default search order is
+            not confirmed to be newest-first (empirically it isn't a
+            simple date sort), so this is "the first N AutoUncle's search
+            gives back", not a guaranteed "the N most recently posted"
+            - if you need the latter, call `search_listings()`/
+            `search_listings_filtered()` yourself, sort by whatever
+            criteria you need at level 2, and skip `max_results` entirely.
         delay: Seconds to wait between requests.
         verbose: If True, emit progress via the "autouncle_scraper" logger at INFO level.
         session: Optional requests.Session to reuse (e.g. across repeated
@@ -1419,9 +1421,10 @@ def scrape(
 
     Returns:
         A ScrapeResult with `.listings` (raw parsed records) and `.rows`
-        (flattened dicts, one per listing). Sorted by price ascending where
-        known - unless `max_results` was given, in which case both are
-        sorted newest-first (by `firstSeenAt`) and capped at `max_results`.
+        (flattened dicts, one per listing), sorted by price ascending where
+        known. If `max_results` was given, both are additionally capped to
+        the first `max_results` matching listings before that sort runs -
+        see `max_results` above for what "first" means here.
     """
     if category not in SUPPORTED_CATEGORIES:
         raise ValueError(f"Unsupported category {category!r}. Only {SUPPORTED_CATEGORIES} are implemented.")
@@ -1434,15 +1437,8 @@ def scrape(
         if lo is not None and hi is not None and lo > hi:
             raise ValueError(f"{lo_name} ({lo}) cannot be greater than {hi_name} ({hi})")
 
-    if max_results is not None:
-        if max_results <= 0:
-            raise ValueError(f"max_results ({max_results}) must be a positive integer")
-        if not detail:
-            raise ValueError(
-                "max_results requires detail=True - AutoUncle exposes no 'date posted' field in "
-                "summary/search-result data, so determining true newest-first order requires visiting "
-                "every matching listing's detail page."
-            )
+    if max_results is not None and max_results <= 0:
+        raise ValueError(f"max_results ({max_results}) must be a positive integer")
 
     # Validated here (before any network call), same as the range checks
     # above - build_car_search_input() (called later) validates these too,
@@ -1535,6 +1531,17 @@ def scrape(
         listings = search_listings(make_key, model_key, domain_cfg, session=session, delay=delay, verbose=verbose)
     total_reported = len(listings)
 
+    if max_results is not None and len(listings) > max_results:
+        if verbose:
+            logger.info(
+                "Opening only the first %d of %d matching listings (max_results=%d) - the rest are never "
+                "fetched, so the search stays fast ...",
+                max_results,
+                len(listings),
+                max_results,
+            )
+        listings = listings[:max_results]
+
     if detail:
         if verbose:
             logger.info("Visiting each of %d listings one by one to extract full details ...", len(listings))
@@ -1546,22 +1553,8 @@ def scrape(
             "RSC (the filtered-search data source) carries no summary fields, unlike JSON-LD."
         )
 
-    if max_results is not None:
-        listings.sort(key=lambda item: item.get("firstSeenAt") or "", reverse=True)
-        if len(listings) > max_results and verbose:
-            logger.info(
-                "Keeping the %d most recently posted of %d matching listings (max_results=%d) ...",
-                max_results,
-                len(listings),
-                max_results,
-            )
-        listings = listings[:max_results]
-
     rows = [flatten_listing(item) for item in listings]
-    if max_results is not None:
-        rows.sort(key=lambda r: r.get("firstSeenAt") or "", reverse=True)
-    else:
-        rows.sort(key=lambda r: (r.get("price") in (None, ""), r.get("price")))
+    rows.sort(key=lambda r: (r.get("price") in (None, ""), r.get("price")))
 
     return ScrapeResult(
         make=make_key,
@@ -1612,9 +1605,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--max-results",
         type=int,
         default=None,
-        help="Keep only this many listings, most recently posted to AutoUncle first. Requires detail "
-        "(incompatible with --no-detail): AutoUncle has no 'date posted' field in search-result data, so "
-        "this doesn't reduce how many detail pages get fetched, only how many are kept.",
+        help="Only open this many listings (the first N AutoUncle's search returns) and skip the rest - "
+        "keeps large searches fast. Not guaranteed to be the N most recently posted, since AutoUncle's "
+        "default search order isn't a date sort.",
     )
     parser.add_argument("--delay", type=float, default=0.4, help="Delay in seconds between requests.")
     parser.add_argument("--price-from", type=int, default=None, help="Minimum price in CHF (inclusive).")

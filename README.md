@@ -116,7 +116,7 @@ command is `autouncle-scraper --make VW --model Golf`.
 | `--seller-kind` | `Dealer` or `Private` |
 | `--one-owner` | Only listings with a single previous owner |
 | `--equipment` | Comma-separated equipment flags a listing must all have, e.g. `hasGps,hasAppleCarPlay` — see [docs/REFERENCE.md](docs/REFERENCE.md) for all ~30 recognized flags |
-| `--max-results` | Keep only this many listings, most recently posted first (requires detail — see below) |
+| `--max-results` | Only open this many listings and skip the rest — see below |
 | `-v` / `--verbose` | Also show debug-level detail, including every HTTP request (mutually exclusive with `-q`) |
 | `-q` / `--quiet` | Suppress progress output; only warnings/errors (mutually exclusive with `-v`) |
 
@@ -133,7 +133,7 @@ pipenv run python autouncle_scraper.py --make VW --model Golf --no-detail
 # 2015 or newer, under CHF 30'000
 pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --price-to 30000 --year-from 2015
 
-# Only the 20 most recently posted matches
+# Only open the first 20 matches - fast, skips the rest entirely
 pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --max-results 20
 
 # Diesel SUVs with a rear-view camera, from a dealer, one owner
@@ -168,15 +168,17 @@ you want to call them directly instead of going through `scrape()`:
 2. **Level 2 (detail)** — `visit_all_listings()`/`fetch_detail()` — visits
    each matching listing's own page for everything level 1 doesn't have:
    full address, price history, gallery, equipment, and the `firstSeenAt`
-   timestamp `--max-results` sorts by. One request per listing.
+   timestamp. One request per listing.
 
-`--max-results`/`max_results` **only trims what's returned, not what's
-fetched**: AutoUncle has no "date posted" field anywhere in level-1 data,
-so knowing the true newest N requires visiting every matching listing at
-level 2 regardless of N. If that cost matters for a large result set,
-narrow it first with `--price-from`/`--year-from`/etc., or call
-`search_listings()`/`search_listings_filtered()` yourself and decide which
-ids are worth a level-2 visit using your own logic.
+`--max-results`/`max_results` keeps the search fast on a large result set by
+capping things off **before** level 2, not after: only the first N ids that
+level 1 returns ever get a level-2 visit (or get returned at all, with
+`--no-detail`) — the rest are never fetched. The trade-off: AutoUncle's own
+default result order isn't a date sort, so this is "the first N AutoUncle's
+search hands back", not a guaranteed "the N most recently posted". If you
+need the latter, don't use `max_results` — call `search_listings()`/
+`search_listings_filtered()` yourself, visit whichever ids you need at
+level 2, and sort by `firstSeenAt` on your own.
 
 ### As a library
 

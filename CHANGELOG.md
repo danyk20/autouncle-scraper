@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-23
+
+### Changed
+
+- **`max_results`/`--max-results` now caps the search *before* opening any
+  listing, not after.** Previously it visited the detail page of every
+  matching listing (to sort by `firstSeenAt`) and only trimmed the
+  returned set afterwards - correct, but defeated the purpose of asking
+  for a small `max_results` on a search with many matches. Now only the
+  first `max_results` ids from the search phase are ever opened (or
+  returned, with `detail=False`) and the rest are never fetched at all,
+  which is what actually makes a large search fast. The trade-off: this is
+  "the first N listings AutoUncle's own search returns", not a guaranteed
+  "the N most recently posted" - AutoUncle's default result order isn't a
+  date sort. `max_results` no longer requires `detail=True`.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added

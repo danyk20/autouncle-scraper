@@ -227,8 +227,26 @@ class TestMain:
             listings = json.load(f)
         assert len(listings) == 3
 
-    def test_max_results_with_no_detail_returns_error_exit_code(self):
-        assert au.run_cli(["--make", "VW", "--model", "Golf", "--no-detail", "--max-results", "5"]) == 1
+    @responses.activate
+    def test_max_results_with_no_detail_now_succeeds(self, search_form_config, no_sleep, tmp_path, monkeypatch):
+        """max_results no longer requires detail=True - capping before the
+        detail phase (never opened here at all) is the whole point."""
+        monkeypatch.chdir(tmp_path)
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/api/v4/car_search_form/config",
+            json=search_form_config,
+            status=200,
+        )
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf",
+            body=_single_page_search_fixture(),
+            status=200,
+        )
+        assert au.run_cli(["--make", "VW", "--model", "Golf", "--no-detail", "--max-results", "5"]) == 0
+        with open(tmp_path / "vw_golf.json", encoding="utf-8") as f:
+            assert len(json.load(f)) == 5
 
     @responses.activate
     def test_version_flag_exits_zero(self, capsys):

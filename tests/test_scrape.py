@@ -274,46 +274,29 @@ class TestScrapeMaxResults:
         with pytest.raises(ValueError, match="max_results"):
             au.scrape("VW", "Golf", max_results=0)
 
-    def test_max_results_with_detail_false_raises(self):
-        with pytest.raises(ValueError, match="max_results requires detail=True"):
-            au.scrape("VW", "Golf", detail=False, max_results=5)
-
     @responses.activate
-    def test_sorts_newest_first_and_truncates(self, search_form_config, no_sleep):
+    def test_max_results_only_opens_the_first_n_and_skips_the_rest(self, search_form_config, no_sleep):
+        """max_results must cap *before* the detail phase - only the first N
+        ids from search get a detail request at all; requesting a detail
+        page for any of the other ids would 500 (not mocked), proving
+        they're genuinely never fetched, not just fetched-then-discarded."""
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
             "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf",
-            body=_single_page_search_fixture(),  # 9 real ids, see module-level helper
+            body=_single_page_search_fixture(),  # 9 real ids, in a fixed order, see module-level helper
             status=200,
         )
-        ids = ["6334442", "7001303", "6931690", "5160563", "6878461", "6767818", "6917430", "6836215", "6605992"]
-        # Deliberately out-of-order firstSeenAt values, one per id.
-        timestamps = [
-            "2026-01-01T00:00:00+00:00",
-            "2026-06-15T00:00:00+00:00",  # newest
-            "2026-03-01T00:00:00+00:00",
-            "2025-12-01T00:00:00+00:00",
-            "2026-05-01T00:00:00+00:00",  # 2nd newest
-            "2026-02-01T00:00:00+00:00",
-            "2026-04-01T00:00:00+00:00",
-            "2025-11-01T00:00:00+00:00",
-            "2026-01-15T00:00:00+00:00",
-        ]
-        for listing_id, ts in zip(ids, timestamps, strict=True):
-            _mock_detail(listing_id, ts, price=10000)
+        first_three_ids = ["6334442", "7001303", "6931690"]
+        for listing_id in first_three_ids:
+            _mock_detail(listing_id, "2026-01-01T00:00:00+00:00", price=10000)
 
         result = au.scrape("VW", "Golf", max_results=3)
 
         assert result.total_reported == 9  # the true total, unaffected by truncation
         assert len(result.listings) == 3
         assert len(result.rows) == 3
-        assert [item["id"] for item in result.listings] == ["7001303", "6878461", "6917430"]
-        assert [row["firstSeenAt"] for row in result.rows] == [
-            "2026-06-15T00:00:00+00:00",
-            "2026-05-01T00:00:00+00:00",
-            "2026-04-01T00:00:00+00:00",
-        ]
+        assert [item["id"] for item in result.listings] == first_three_ids
 
     @responses.activate
     def test_max_results_larger_than_available_keeps_everything(self, search_form_config, no_sleep):
@@ -341,7 +324,9 @@ class TestScrapeMaxResults:
         assert len(result.rows) == 9
 
     @responses.activate
-    def test_listings_with_unknown_first_seen_sort_last(self, search_form_config, no_sleep):
+    def test_max_results_works_without_detail(self, search_form_config, no_sleep):
+        """Unlike the old semantics, max_results no longer requires detail=True -
+        capping at level 1 (before any detail page is opened) is the whole point."""
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
@@ -349,24 +334,6 @@ class TestScrapeMaxResults:
             body=_single_page_search_fixture(),
             status=200,
         )
-        ids = ["6334442", "7001303", "6931690", "5160563", "6878461", "6767818", "6917430", "6836215", "6605992"]
-        for i, listing_id in enumerate(ids):
-            if i == 0:
-                # No Dataset object at all -> firstSeenAt is None.
-                responses.add(
-                    responses.GET,
-                    f"https://www.autouncle.ch/de-ch/d/{listing_id}",
-                    body=(
-                        '<script type="application/ld+json">{"@graph":[{"@type":["Product","Vehicle"],'
-                        f'"@id":"https://www.autouncle.ch/de-ch/d/{listing_id}-x#product"}}]}}'
-                        "</script>"
-                    ),
-                    status=200,
-                )
-            else:
-                _mock_detail(listing_id, "2026-01-01T00:00:00+00:00", price=10000)
-
-        result = au.scrape("VW", "Golf", max_results=9)
-        # The id with no firstSeenAt (index 0, "6334442") must sort last.
-        assert result.rows[-1]["id"] == "6334442"
-        assert result.rows[-1]["firstSeenAt"] == ""
+        result = au.scrape("VW", "Golf", detail=False, max_results=3)
+        assert len(result.rows) == 3
+        assert "priceHistory" not in result.rows[0]

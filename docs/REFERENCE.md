@@ -155,7 +155,7 @@ def scrape(
     one_owner: bool | None = None,
     equipment: Iterable[str] | None = None,    # see EQUIPMENT_OPTIONS - AND semantics
     extra_filters: dict | None = None,         # passthrough for any other confirmed CarSearchInput field
-    max_results: int | None = None,  # keep only this many, newest (`firstSeenAt`) first - requires detail=True
+    max_results: int | None = None,  # only open this many listings (first N from search order), skip the rest
     delay: float = 0.4,              # seconds between HTTP requests
     verbose: bool = True,            # emit progress via the "autouncle_scraper" logger at INFO level
     session: requests.Session | None = None,  # reuse a session across calls if given
@@ -216,9 +216,15 @@ be one or a few short of `total_reported`. `total_reported` always reflects
 what the search phase itself found - it is never adjusted for skips. For a
 filtered search with `detail=False`, `total_reported` is still the true
 total, but each row is just `{"id": ...}`. If `max_results` was given,
-both `.rows` and `.listings` are further capped at `max_results` (sorted
-newest-first by `firstSeenAt`) - `total_reported` is unaffected by that
-either.
+both `.rows` and `.listings` are capped at `max_results` **before** the
+detail phase runs - only the first `max_results` ids from the search
+phase are ever visited (or returned, with `detail=False`); the rest are
+never fetched at all, which is the entire point of the parameter.
+`total_reported` always reflects the search phase's true total and is
+unaffected by that cap. Because the cap happens before ordering by
+recency is possible, "first" here means "first in AutoUncle's own default
+search-result order", which is not confirmed to be a date sort - so
+`max_results` gives you *a* fast N, not guaranteed to be the *newest* N.
 
 ## Data structure
 
@@ -260,7 +266,7 @@ whatever the detail page adds:
 | `fuelConsumptionLabel`, `co2EmissionsLabel` | mirrors `fuelConsumptionL100km`/`co2GKm` from a second source (`additionalProperty`) |
 | `otherProperties` | `list[{name, value}]` | Any `additionalProperty` entry not recognized by the fixed label table in `ADDITIONAL_PROPERTY_LABELS` — nothing is silently dropped |
 | `priceHistory` | `list[{date, price, currency, description}]` | Full historical price time series. **Not exposed by AutoScout24 at all.** |
-| `firstSeenAt`, `lastUpdatedAt` | `string \| None` (ISO 8601) | Earliest/latest date in `priceHistory` — **not** the JSON-LD `Dataset`'s own `datePublished`/`dateModified` fields, which are confirmed live to be request-time noise (they come back ~equal to "now" regardless of the listing) rather than real listing metadata. This is the field `scrape(..., max_results=N)` sorts by. `None` when there's no price history to derive it from. |
+| `firstSeenAt`, `lastUpdatedAt` | `string \| None` (ISO 8601) | Earliest/latest date in `priceHistory` — **not** the JSON-LD `Dataset`'s own `datePublished`/`dateModified` fields, which are confirmed live to be request-time noise (they come back ~equal to "now" regardless of the listing) rather than real listing metadata. `None` when there's no price history to derive it from. Note `max_results` does **not** sort or filter by this field — see the `ScrapeResult` notes above. |
 | `datasetLicense`, `datasetIsAccessibleForFree` | `string \| None`, `bool \| None` | From the JSON-LD `Dataset` object backing `priceHistory` — as of this writing, `"https://creativecommons.org/licenses/by/4.0/"` and `true` |
 | `imageUrls` | `list[str]` | Full gallery, deduped by image uuid, full-resolution preferred over size-prefixed variants |
 | `equipment` | `dict[str, str]` | Variable per listing — spec/equipment label → value pairs (e.g. `{"Klimaanlage": "Ja", "Türen": "2"}`) scraped from the rendered page, not JSON-LD |
