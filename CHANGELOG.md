@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-23
+
+### Fixed
+
+- Level-1-only fields (`modelVariant` - e.g. the "85D"/"P90D (Free
+  Supercharging)" trim spec - plus `priceChangePercent`,
+  `estimatedMarketPriceChf`, `sourcePath`) were silently lost once a
+  listing went through the detail phase, since AutoUncle's detail page
+  never renders them and `scrape()` previously discarded the search-phase
+  record entirely in favor of a fresh detail-only one. `scrape()` now
+  merges the level-1 record's fields back into each detail record
+  afterward (fill gaps only - a field the detail page's own data already
+  set, e.g. `price` or a more precise `addressLocality`, always wins), so
+  `detail=True` (the default) never loses anything `detail=False` would
+  have shown.
+
 ## [0.4.0] - 2026-07-23
 
 ### Added

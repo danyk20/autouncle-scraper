@@ -285,7 +285,15 @@ a card object for falls back to `{"id": "<listing id>"}` alone.
 
 **Any search with `detail=True`** (the default) — everything above (with
 JSON-LD now filling in whatever the RSC search card didn't have, for a
-filtered search too), plus whatever the detail page adds:
+filtered search too), plus whatever the detail page adds. Crucially,
+`scrape()` explicitly merges the level-1 record's fields back into each
+detail record afterward (fill gaps only, never overwrite - see its
+docstring): the detail page itself never renders `modelVariant`,
+`priceChangePercent`, `estimatedMarketPriceChf`, or `sourcePath` at all, so
+without this merge those would silently vanish once a listing goes through
+the detail phase, even though level 1 had them. A field the detail page
+*does* set (e.g. `price`, or a more precise `addressLocality`) always wins
+over the level-1 value.
 
 | Field | Type | Description |
 |---|---|---|

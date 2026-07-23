@@ -191,6 +191,44 @@ class TestScrapeFiltered:
         assert "priceHistory" in result.rows[0]
 
     @responses.activate
+    def test_level1_only_fields_survive_into_detail_records(self, search_form_config, no_sleep):
+        """The detail page never renders modelVariant/priceChangePercent/
+        sourcePath at all (see fetch_detail()) - so without carrying the
+        level-1 RSC card's fields forward, a full detail=True scrape would
+        silently lose them (e.g. the "85D"-style trim spec vanishing once
+        a listing goes through the detail phase). scrape() must merge them
+        back in from the level-1 record, without clobbering a field the
+        detail page's own (more authoritative) data already set."""
+        _mock_config(search_form_config)
+        card = {
+            "carId": "6979282",
+            "subtitle": "85D",
+            "priceChange": -12,
+            "outgoingPath": "/de-ch/das_wiedersehen/some-portal/6979282/1",
+        }
+        rsc_text = (
+            '"resultsInfo":"Zeige 1 - 1 von 1 Resultate","pagination":{"currentPage":1,"lastPage":true}\n'
+            '4a:["$","div",null,{"children":[["$","$1","6979282",{"children":[false,false,false,"$L56",false]}]]}]\n'
+            f'69:["$","$Lce",null,{json.dumps(card, separators=(",", ":"))}]\n'
+        )
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf?s%5Bmax_price%5D=5000",
+            body=rsc_text,
+            status=200,
+        )
+        _mock_detail("6979282", "2026-01-01T00:00:00+00:00", price=4500)
+
+        result = au.scrape("VW", "Golf", price_to=5000, detail=True)
+
+        row = result.rows[0]
+        assert row["modelVariant"] == "85D"
+        assert row["priceChangePercent"] == -12
+        assert row["sourcePath"] == "/de-ch/das_wiedersehen/some-portal/6979282/1"
+        # The detail page's own price must win over anything level 1 had.
+        assert row["price"] == 4500
+
+    @responses.activate
     def test_all_three_filter_dimensions_logged_verbosely(self, search_form_config, no_sleep, caplog):
         import logging
 

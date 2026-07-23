@@ -129,7 +129,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 
 @dataclass(frozen=True)
@@ -1573,11 +1573,15 @@ def scrape(
             parameter (rather than dropped) for signature parity with the
             AutoScout24 scraper; any other value raises ValueError.
         detail: If True (default), visit every listing's detail page one by
-            one for the full record (address, price history, gallery,
-            equipment - see the module docstring). If False, unfiltered
-            searches keep the still-fairly-rich JSON-LD summary fields;
-            filtered searches keep only bare ids (RSC carries no summary
-            fields at all - a warning is logged in that case).
+            one for what only a detail visit can provide (fuel type,
+            transmission, engine power, CO2/consumption figures, full price
+            history, equipment - see the module docstring); every field the
+            search phase already found (including RSC-search-card-only
+            fields like "modelVariant") is merged back in afterward, so
+            nothing level 1 found is ever lost by also fetching detail. If
+            False, both unfiltered and filtered searches keep everything
+            visible on the search page itself (see "modelVariant" etc.
+            above) but skip the fields only a detail visit provides.
         price_from/price_to: Optional price range in CHF (inclusive).
         mileage_from/mileage_to: Optional mileage range in km (inclusive).
         year_from/year_to: Optional first-registration year range (inclusive).
@@ -1741,8 +1745,21 @@ def scrape(
     if detail:
         if verbose:
             logger.info("Visiting each of %d listings one by one to extract full details ...", len(listings))
-        listing_ids = [item["id"] for item in listings if item.get("id")]
-        listings = visit_all_listings(listing_ids, domain_cfg=domain_cfg, session=session, delay=delay, verbose=verbose)
+        level1_by_id = {item["id"]: item for item in listings if item.get("id")}
+        listings = visit_all_listings(
+            list(level1_by_id), domain_cfg=domain_cfg, session=session, delay=delay, verbose=verbose
+        )
+        # The detail page doesn't carry every field the search-result card
+        # does (e.g. "modelVariant"/"P90D (Free Supercharging)",
+        # "priceChangePercent", "estimatedMarketPriceChf", "sourcePath" -
+        # AutoUncle's detail page just never renders those) - fill those
+        # gaps from the level-1 record, without ever overwriting a field
+        # the detail page's own (more authoritative, e.g. more precise
+        # address) data already set.
+        for item in listings:
+            for key, value in level1_by_id.get(item.get("id"), {}).items():
+                if value is not None and item.get(key) is None:
+                    item[key] = value
     elif filtered:
         logger.info(
             "detail=False on a filtered search still fills in the search-card fields (price, mileage, "
