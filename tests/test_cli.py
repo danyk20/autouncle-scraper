@@ -83,6 +83,8 @@ class TestBuildArgParser:
                 "2015",
                 "--year-to",
                 "2020",
+                "--max-results",
+                "10",
                 "-v",
             ]
         )
@@ -92,7 +94,13 @@ class TestBuildArgParser:
         assert args.delay == 1.5
         assert args.price_from == 1000
         assert args.price_to == 5000
+        assert args.max_results == 10
         assert args.verbose is True
+
+    def test_max_results_defaults_to_none(self):
+        parser = au.build_arg_parser()
+        args = parser.parse_args(["--make", "VW", "--model", "Golf"])
+        assert args.max_results is None
 
     def test_verbose_and_quiet_are_mutually_exclusive(self):
         parser = au.build_arg_parser()
@@ -139,6 +147,18 @@ class TestMain:
         assert len(listings) == 9
         # No detail visit happened, so no priceHistory field is present.
         assert "priceHistory" not in listings[0]
+
+    @responses.activate
+    def test_max_results_truncates_output(self, unfiltered_scrape_mocks, no_sleep, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        exit_code = au.main(["--make", "VW", "--model", "Golf", "--max-results", "3"])
+        assert exit_code == 0
+        with open(tmp_path / "vw_golf.json", encoding="utf-8") as f:
+            listings = json.load(f)
+        assert len(listings) == 3
+
+    def test_max_results_with_no_detail_returns_error_exit_code(self):
+        assert au.run_cli(["--make", "VW", "--model", "Golf", "--no-detail", "--max-results", "5"]) == 1
 
     @responses.activate
     def test_version_flag_exits_zero(self, capsys):

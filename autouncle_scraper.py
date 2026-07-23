@@ -559,7 +559,25 @@ def parse_detail_jsonld(html: str) -> dict[str, Any]:
     normalized Product+Vehicle record (same parser used for search-result
     items, but with more fields populated here - full address,
     additionalProperty market-analysis fields) plus a "priceHistory" list
-    from the sibling Dataset object, when present."""
+    and "firstSeenAt"/"lastUpdatedAt" timestamps derived from it, when
+    present.
+
+    "firstSeenAt"/"lastUpdatedAt" are the earliest/latest dates in
+    "priceHistory", NOT the Dataset object's own "datePublished"/
+    "dateModified" fields - confirmed live that those two are regenerated
+    on every request (they come back ~equal to "request time" regardless of
+    the listing, verified by re-fetching the same listing seconds apart and
+    seeing a stable value, then comparing several different listings and
+    finding all of them within seconds of each other despite wildly
+    different price-history depth - i.e. they describe when the page/JSON-LD
+    was rendered, not anything about the listing itself). The earliest
+    priceHistory entry is the best available proxy AutoUncle exposes for
+    "when this listing started being tracked" - there is no dedicated field
+    for it anywhere, and no timestamp of any kind in the summary/
+    search-result shape (confirmed: neither the unfiltered JSON-LD ItemList
+    items nor the filtered-search RSC payload carry one), so sorting by
+    "newest listing" requires visiting every candidate's detail page first.
+    See scrape()'s `max_results` handling."""
     graph = _graph_items(html)
     vehicle = find_vehicle(graph)
     if vehicle is None:
@@ -569,11 +587,17 @@ def parse_detail_jsonld(html: str) -> dict[str, Any]:
 
     dataset = find_dataset(graph)
     if dataset is not None:
-        parsed["priceHistory"] = _price_history_from_dataset(dataset)
+        history = _price_history_from_dataset(dataset)
+        parsed["priceHistory"] = history
         parsed["datasetLicense"] = dataset.get("license")
         parsed["datasetIsAccessibleForFree"] = dataset.get("isAccessibleForFree")
+        dates = [h["date"] for h in history if h.get("date")]
+        parsed["firstSeenAt"] = min(dates) if dates else None
+        parsed["lastUpdatedAt"] = max(dates) if dates else None
     else:
         parsed["priceHistory"] = []
+        parsed["firstSeenAt"] = None
+        parsed["lastUpdatedAt"] = None
 
     return parsed
 
@@ -709,6 +733,9 @@ def fetch_detail(listing_id: str, *, domain_cfg: DomainConfig, session: requests
     return detail
 
 
+_LISTING_GONE_STATUS_CODES = {404, 410}
+
+
 def visit_all_listings(
     listing_ids: Iterable[str],
     *,
@@ -721,13 +748,32 @@ def visit_all_listings(
     parsed record for each. This is where the vast majority of scraped
     fields come from - full address, price history, market-analysis
     labels, gallery, equipment - regardless of whether the search phase
-    used JSON-LD or the filtered GraphQL+RSC path."""
+    used JSON-LD or the filtered GraphQL+RSC path.
+
+    A listing can legitimately disappear (sold, ad removed) between the
+    search phase finding its id and this function visiting it - confirmed
+    live, as a 410 on a listing that was in the search results moments
+    earlier. That's normal for live inventory, not a scraper bug, so a
+    404/410 for one listing is logged and skipped rather than aborting the
+    whole batch; any other error (a persistent network failure, an
+    unexpected 4xx that might indicate rate-limiting) still propagates,
+    since silently swallowing those could mask a real problem. This means
+    the returned list can be shorter than `listing_ids` - callers that need
+    an exact count (e.g. scrape()'s `total_reported`) should capture it
+    from the search phase, before calling this function."""
     ids = list(listing_ids)
     total = len(ids)
     visited: list[dict[str, Any]] = []
     for i, listing_id in enumerate(ids, 1):
-        detail = fetch_detail(listing_id, domain_cfg=domain_cfg, session=session)
-        visited.append(detail)
+        try:
+            detail = fetch_detail(listing_id, domain_cfg=domain_cfg, session=session)
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status not in _LISTING_GONE_STATUS_CODES:
+                raise
+            logger.warning("  listing %s is gone (HTTP %d); skipping", listing_id, status)
+        else:
+            visited.append(detail)
         if verbose and (i % 10 == 0 or i == total):
             logger.info("  visited %d/%d listings (id=%s)", i, total, listing_id)
         if i < total:
@@ -1034,6 +1080,7 @@ PRIORITY_FIELDS = [
     "make",
     "model",
     "year",
+    "firstSeenAt",
     "price",
     "priceCurrency",
     "mileageKm",
@@ -1173,6 +1220,7 @@ def scrape(
     mileage_to: int | None = None,
     year_from: int | None = None,
     year_to: int | None = None,
+    max_results: int | None = None,
     delay: float = 0.4,
     verbose: bool = True,
     session: requests.Session | None = None,
@@ -1202,6 +1250,17 @@ def scrape(
         price_from/price_to: Optional price range in CHF (inclusive).
         mileage_from/mileage_to: Optional mileage range in km (inclusive).
         year_from/year_to: Optional first-registration year range (inclusive).
+        max_results: If given, keep only this many listings - the ones most
+            recently posted to AutoUncle first ("firstSeenAt" descending;
+            listings without a known timestamp sort last). Requires
+            `detail=True` (the default): there is no "date posted" field
+            anywhere in the summary/search-result data (neither the
+            unfiltered JSON-LD nor the filtered RSC payload carry one), so
+            determining true newest-first order means visiting every
+            matching listing's detail page regardless of `max_results` -
+            this parameter trims the *returned* set, it does not reduce
+            how many detail pages get fetched. Raises ValueError if given
+            together with `detail=False`.
         delay: Seconds to wait between requests.
         verbose: If True, emit progress via the "autouncle_scraper" logger at INFO level.
         session: Optional requests.Session to reuse (e.g. across repeated
@@ -1209,7 +1268,9 @@ def scrape(
 
     Returns:
         A ScrapeResult with `.listings` (raw parsed records) and `.rows`
-        (flattened dicts, one per listing, sorted by price ascending where known).
+        (flattened dicts, one per listing). Sorted by price ascending where
+        known - unless `max_results` was given, in which case both are
+        sorted newest-first (by `firstSeenAt`) and capped at `max_results`.
     """
     if category not in SUPPORTED_CATEGORIES:
         raise ValueError(f"Unsupported category {category!r}. Only {SUPPORTED_CATEGORIES} are implemented.")
@@ -1221,6 +1282,16 @@ def scrape(
     ):
         if lo is not None and hi is not None and lo > hi:
             raise ValueError(f"{lo_name} ({lo}) cannot be greater than {hi_name} ({hi})")
+
+    if max_results is not None:
+        if max_results <= 0:
+            raise ValueError(f"max_results ({max_results}) must be a positive integer")
+        if not detail:
+            raise ValueError(
+                "max_results requires detail=True - AutoUncle exposes no 'date posted' field in "
+                "summary/search-result data, so determining true newest-first order requires visiting "
+                "every matching listing's detail page."
+            )
 
     domain_cfg = get_domain_config(domain)
     session = session or make_session()
@@ -1280,8 +1351,22 @@ def scrape(
             "RSC (the filtered-search data source) carries no summary fields, unlike JSON-LD."
         )
 
+    if max_results is not None:
+        listings.sort(key=lambda item: item.get("firstSeenAt") or "", reverse=True)
+        if len(listings) > max_results and verbose:
+            logger.info(
+                "Keeping the %d most recently posted of %d matching listings (max_results=%d) ...",
+                max_results,
+                len(listings),
+                max_results,
+            )
+        listings = listings[:max_results]
+
     rows = [flatten_listing(item) for item in listings]
-    rows.sort(key=lambda r: (r.get("price") in (None, ""), r.get("price")))
+    if max_results is not None:
+        rows.sort(key=lambda r: r.get("firstSeenAt") or "", reverse=True)
+    else:
+        rows.sort(key=lambda r: (r.get("price") in (None, ""), r.get("price")))
 
     return ScrapeResult(
         make=make_key,
@@ -1323,6 +1408,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip visiting each listing's detail page; keep only the summary fields available from the search "
         "phase (unfiltered searches only - filtered searches always need detail for anything beyond an id).",
+    )
+    parser.add_argument(
+        "--max-results",
+        type=int,
+        default=None,
+        help="Keep only this many listings, most recently posted to AutoUncle first. Requires detail "
+        "(incompatible with --no-detail): AutoUncle has no 'date posted' field in search-result data, so "
+        "this doesn't reduce how many detail pages get fetched, only how many are kept.",
     )
     parser.add_argument("--delay", type=float, default=0.4, help="Delay in seconds between requests.")
     parser.add_argument("--price-from", type=int, default=None, help="Minimum price in CHF (inclusive).")
@@ -1387,6 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
         mileage_to=args.mileage_to,
         year_from=args.year_from,
         year_to=args.year_to,
+        max_results=args.max_results,
         delay=args.delay,
         verbose=True,
     )

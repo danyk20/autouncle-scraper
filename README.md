@@ -73,6 +73,7 @@ command is `autouncle-scraper --make VW --model Golf`.
 | `--price-from` / `--price-to` | Filter by price in CHF (inclusive, either end optional) |
 | `--mileage-from` / `--mileage-to` | Filter by mileage in km (inclusive, either end optional) |
 | `--year-from` / `--year-to` | Filter by first-registration year (inclusive, either end optional) |
+| `--max-results` | Keep only this many listings, most recently posted first (requires detail — see below) |
 | `-v` / `--verbose` | Also show debug-level detail, including every HTTP request (mutually exclusive with `-q`) |
 | `-q` / `--quiet` | Suppress progress output; only warnings/errors (mutually exclusive with `-v`) |
 
@@ -86,6 +87,9 @@ pipenv run python autouncle_scraper.py --make VW --model Golf --no-detail
 
 # 2015 or newer, under CHF 30'000
 pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --price-to 30000 --year-from 2015
+
+# Only the 20 most recently posted matches
+pipenv run python autouncle_scraper.py --make VW --model "Golf VIII" --max-results 20
 ```
 
 **One honest asymmetry vs. AutoScout24**: unfiltered searches use
@@ -95,6 +99,30 @@ Filtered searches use a different mechanism (see
 so `--no-detail` on a filtered search gives you ids only, plus a logged
 warning. Leave `--no-detail` off (the default) for anything beyond a bare
 count.
+
+## Two-level scraping
+
+Every search is really two steps, both available as their own functions if
+you want to call them directly instead of going through `scrape()`:
+
+1. **Level 1 (search)** — `search_listings()` (unfiltered) or
+   `search_listings_filtered()` (any price/mileage/year filter) — finds
+   every matching listing *without opening a single ad*. Cheap: 1 request
+   per ~25 results. This is what `detail=False`/`--no-detail` stops at, and
+   what you'd use to evaluate your own extra criteria against the summary
+   fields before deciding whether level 2 is worth it.
+2. **Level 2 (detail)** — `visit_all_listings()`/`fetch_detail()` — visits
+   each matching listing's own page for everything level 1 doesn't have:
+   full address, price history, gallery, equipment, and the `firstSeenAt`
+   timestamp `--max-results` sorts by. One request per listing.
+
+`--max-results`/`max_results` **only trims what's returned, not what's
+fetched**: AutoUncle has no "date posted" field anywhere in level-1 data,
+so knowing the true newest N requires visiting every matching listing at
+level 2 regardless of N. If that cost matters for a large result set,
+narrow it first with `--price-from`/`--year-from`/etc., or call
+`search_listings()`/`search_listings_filtered()` yourself and decide which
+ids are worth a level-2 visit using your own logic.
 
 ### As a library
 

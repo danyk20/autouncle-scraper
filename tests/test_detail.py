@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+import requests
 import responses
 
 import autouncle_scraper as au
@@ -63,13 +65,26 @@ class TestParseDetailJsonld:
         assert parsed["datasetIsAccessibleForFree"] is True
         assert parsed["datasetLicense"] == "https://creativecommons.org/licenses/by/4.0/"
 
+    def test_first_seen_and_last_updated_are_price_history_extremes(self):
+        # Derived from priceHistory's earliest/latest dates, NOT the
+        # Dataset's own datePublished/dateModified (confirmed live to be
+        # request-time noise, not stable listing metadata - see
+        # parse_detail_jsonld()'s docstring).
+        html = load_fixture("detail_6690428.html")
+        parsed = au.parse_detail_jsonld(html)
+
+        assert parsed["firstSeenAt"] == "2026-03-03T02:15:44+01:00"
+        assert parsed["lastUpdatedAt"] == "2026-07-04T11:51:00+02:00"
+        assert parsed["firstSeenAt"] == min(h["date"] for h in parsed["priceHistory"])
+        assert parsed["lastUpdatedAt"] == max(h["date"] for h in parsed["priceHistory"])
+
     def test_raises_when_no_vehicle_jsonld(self):
         import pytest
 
         with pytest.raises(ValueError, match="No Vehicle JSON-LD"):
             au.parse_detail_jsonld("<html><body>not a listing page</body></html>")
 
-    def test_missing_dataset_yields_empty_price_history(self):
+    def test_missing_dataset_yields_empty_price_history_and_none_timestamps(self):
         html = (
             '<script type="application/ld+json">'
             '{"@graph":[{"@type":["Product","Vehicle"],"@id":"https://x/d/1-y#product"}]}'
@@ -77,6 +92,8 @@ class TestParseDetailJsonld:
         )
         parsed = au.parse_detail_jsonld(html)
         assert parsed["priceHistory"] == []
+        assert parsed["firstSeenAt"] is None
+        assert parsed["lastUpdatedAt"] is None
         assert "datasetLicense" not in parsed
 
 
@@ -137,6 +154,37 @@ class TestVisitAllListings:
     def test_empty_input_returns_empty(self, no_sleep):
         session = au.make_session()
         assert au.visit_all_listings([], domain_cfg=DOMAIN_CFG, session=session) == []
+
+    @responses.activate
+    def test_gone_listing_is_skipped_not_fatal(self, no_sleep, caplog):
+        import logging
+
+        caplog.set_level(logging.WARNING, logger="autouncle_scraper")
+        html = load_fixture("detail_6690428.html")
+        responses.add(responses.GET, "https://www.autouncle.ch/de-ch/d/1111111", status=410)
+        responses.add(responses.GET, "https://www.autouncle.ch/de-ch/d/6690428", body=html, status=200)
+
+        session = au.make_session()
+        visited = au.visit_all_listings(["1111111", "6690428"], domain_cfg=DOMAIN_CFG, session=session)
+
+        assert len(visited) == 1
+        assert visited[0]["id"] == "6690428"
+        assert "listing 1111111 is gone (HTTP 410); skipping" in caplog.text
+
+    @responses.activate
+    def test_not_found_listing_is_also_skipped(self, no_sleep):
+        responses.add(responses.GET, "https://www.autouncle.ch/de-ch/d/1111111", status=404)
+        session = au.make_session()
+        visited = au.visit_all_listings(["1111111"], domain_cfg=DOMAIN_CFG, session=session)
+        assert visited == []
+
+    @responses.activate
+    def test_other_http_errors_still_propagate(self, no_sleep):
+        for _ in range(5):
+            responses.add(responses.GET, "https://www.autouncle.ch/de-ch/d/1111111", status=500)
+        session = au.make_session()
+        with pytest.raises(requests.HTTPError):
+            au.visit_all_listings(["1111111"], domain_cfg=DOMAIN_CFG, session=session)
 
 
 class TestExtractGalleryImages:

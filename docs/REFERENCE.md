@@ -114,6 +114,7 @@ def scrape(
     mileage_to: int | None = None,   # km, inclusive
     year_from: int | None = None,    # first-registration year, inclusive
     year_to: int | None = None,      # first-registration year, inclusive
+    max_results: int | None = None,  # keep only this many, newest (`firstSeenAt`) first - requires detail=True
     delay: float = 0.4,              # seconds between HTTP requests
     verbose: bool = True,            # emit progress via the "autouncle_scraper" logger at INFO level
     session: requests.Session | None = None,  # reuse a session across calls if given
@@ -163,11 +164,20 @@ class ScrapeResult:
     def to_json(self, path: str) -> None: ...  # writes self.listings
 ```
 
-`len(result.rows) == len(result.listings) == result.total_reported` always
-holds for an **unfiltered** search (`detail` only adds fields, never drops
-or adds listings) or a **filtered** search visited with `detail=True`. For
-a filtered search with `detail=False`, `total_reported` is still the true
-total, but each row is just `{"id": ...}`.
+`len(result.rows) == len(result.listings) == result.total_reported` holds
+for an **unfiltered** search (`detail` only adds fields, never drops or
+adds listings) or a **filtered** search visited with `detail=True` -
+**except** that a listing can legitimately disappear (sold, ad removed)
+between the search phase finding it and the detail phase visiting it; that
+one listing is skipped (logged as a warning) rather than aborting the
+whole scrape, so `len(result.rows)`/`len(result.listings)` can occasionally
+be one or a few short of `total_reported`. `total_reported` always reflects
+what the search phase itself found - it is never adjusted for skips. For a
+filtered search with `detail=False`, `total_reported` is still the true
+total, but each row is just `{"id": ...}`. If `max_results` was given,
+both `.rows` and `.listings` are further capped at `max_results` (sorted
+newest-first by `firstSeenAt`) - `total_reported` is unaffected by that
+either.
 
 ## Data structure
 
@@ -209,6 +219,7 @@ whatever the detail page adds:
 | `fuelConsumptionLabel`, `co2EmissionsLabel` | mirrors `fuelConsumptionL100km`/`co2GKm` from a second source (`additionalProperty`) |
 | `otherProperties` | `list[{name, value}]` | Any `additionalProperty` entry not recognized by the fixed label table in `ADDITIONAL_PROPERTY_LABELS` — nothing is silently dropped |
 | `priceHistory` | `list[{date, price, currency, description}]` | Full historical price time series. **Not exposed by AutoScout24 at all.** |
+| `firstSeenAt`, `lastUpdatedAt` | `string \| None` (ISO 8601) | Earliest/latest date in `priceHistory` — **not** the JSON-LD `Dataset`'s own `datePublished`/`dateModified` fields, which are confirmed live to be request-time noise (they come back ~equal to "now" regardless of the listing) rather than real listing metadata. This is the field `scrape(..., max_results=N)` sorts by. `None` when there's no price history to derive it from. |
 | `datasetLicense`, `datasetIsAccessibleForFree` | `string \| None`, `bool \| None` | From the JSON-LD `Dataset` object backing `priceHistory` — as of this writing, `"https://creativecommons.org/licenses/by/4.0/"` and `true` |
 | `imageUrls` | `list[str]` | Full gallery, deduped by image uuid, full-resolution preferred over size-prefixed variants |
 | `equipment` | `dict[str, str]` | Variable per listing — spec/equipment label → value pairs (e.g. `{"Klimaanlage": "Ja", "Türen": "2"}`) scraped from the rendered page, not JSON-LD |
@@ -262,7 +273,14 @@ AutoUncle changes something, roughly in order of fragility:
 4. **`dealerName`/`description`/`vin`** always returning `None` — this
    reflects every listing checked at the time of writing, not a guarantee
    that AutoUncle never renders these for any listing.
-5. **The `/api/v4/car_search_form/config` endpoint and JSON-LD shape** are
+5. **`firstSeenAt`/`lastUpdatedAt` being derived from `priceHistory`
+   extremes** rather than a dedicated field — because there isn't one (the
+   JSON-LD `Dataset`'s own `datePublished`/`dateModified` were tried first
+   and found to be request-time noise, not real listing metadata - see the
+   data-structure table above). If AutoUncle ever exposes a real "date
+   posted" field, or changes what `priceHistory` contains, this derivation
+   needs revisiting.
+6. **The `/api/v4/car_search_form/config` endpoint and JSON-LD shape** are
    the most stable of the mechanisms here (a documented-in-spirit REST
    endpoint and a public schema.org vocabulary respectively), but neither
    is a versioned, published contract either.
