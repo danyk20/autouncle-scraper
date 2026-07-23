@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+
 import responses
 
 import autouncle_scraper as au
@@ -94,7 +97,9 @@ class TestSearchListingsRealFixtures:
         listings = au.search_listings("VW", "Golf Alltrack", DOMAIN_CFG, session=session)
 
         assert len(listings) == 25
-        assert len(responses.calls) == 1
+        # 2 requests: the JSON-LD page itself, plus the same page's RSC
+        # fetch for search-card supplements (see search_listings()).
+        assert len(responses.calls) == 2
 
     @responses.activate
     def test_no_item_list_returns_empty(self, no_sleep):
@@ -107,6 +112,44 @@ class TestSearchListingsRealFixtures:
         session = au.make_session()
         listings = au.search_listings("VW", "NoSuchModel", DOMAIN_CFG, session=session)
         assert listings == []
+
+
+class TestSearchListingsCardSupplements:
+    @responses.activate
+    def test_merges_rsc_supplement_without_overwriting_jsonld_fields(self, no_sleep):
+        """search_listings() fetches the same page twice: once for JSON-LD
+        (registered first), once with the RSC header for search-card
+        supplements (registered second) - `responses` serves same-URL mocks
+        in registration order, so this exercises the real two-request path
+        end to end, including the "fill gaps, don't clobber JSON-LD" merge
+        rule in search_listings()."""
+        html = load_fixture("search_vw_golf_alltrack_page1.html")
+        m = re.search(r'"numberOfItems":(\d+)', html)
+        html = html.replace(f'"numberOfItems":{m.group(1)}', '"numberOfItems":25', 1)
+        first_id = re.search(r'"@id":"https://www\.autouncle\.ch/de-ch/d/(\d+)-', html).group(1)
+
+        card = {"carId": first_id, "subtitle": "Special Trim", "laytime": 12, "price": "CHF\xa010’000"}
+        rsc_text = f'69:["$","$Lce",null,{json.dumps(card, ensure_ascii=False, separators=(",", ":"))}]\n'
+
+        responses.add(
+            responses.GET, "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf%20Alltrack", body=html, status=200
+        )
+        responses.add(
+            responses.GET,
+            "https://www.autouncle.ch/de-ch/gebrauchtwagen/VW/Golf%20Alltrack",
+            body=rsc_text,
+            status=200,
+        )
+
+        session = au.make_session()
+        listings = au.search_listings("VW", "Golf Alltrack", DOMAIN_CFG, session=session)
+        item = next(i for i in listings if i["id"] == first_id)
+
+        assert item["modelVariant"] == "Special Trim"
+        assert item["daysOnMarket"] == 12
+        # JSON-LD's own price is authoritative - the supplement must not
+        # overwrite a field JSON-LD already populated.
+        assert item["price"] != 10000
 
 
 class TestParseVehicleJsonld:
@@ -188,4 +231,5 @@ class TestSearchListingsSafetyNet:
         session = au.make_session()
         listings = au.search_listings("VW", "Golf Alltrack", DOMAIN_CFG, session=session)
         assert len(listings) == 25
-        assert len(responses.calls) == 2
+        # 2 pages visited, each fetched twice (JSON-LD + RSC supplements).
+        assert len(responses.calls) == 4

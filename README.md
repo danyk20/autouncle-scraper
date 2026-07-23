@@ -146,13 +146,19 @@ Beyond the flags above, the library's `scrape()` also takes an
 own CLI flag (`euroEmissionClass`, `notLeasing`, `notDamaged`, EV range
 filters, `maxFuelEconomy`) — see [docs/REFERENCE.md](docs/REFERENCE.md).
 
-**One honest asymmetry vs. AutoScout24**: unfiltered searches use
-schema.org JSON-LD, which is already fairly rich even without `--no-detail`.
-Filtered searches use a different mechanism (see
-[docs/REFERENCE.md](docs/REFERENCE.md)) that carries *only* listing ids —
-so `--no-detail` on a filtered search gives you ids only, plus a logged
-warning. Leave `--no-detail` off (the default) for anything beyond a bare
-count.
+**Everything visible on the search page itself is scraped at level 1** —
+without opening a single ad, both unfiltered and filtered searches return
+price, mileage, year, address, the full image gallery, AutoUncle's own
+price-rating label, savings vs. market, price-change percent, days listed,
+the aggregated source marketplace (e.g. "Autoscout24"), and the model/trim
+line (e.g. "P90D (Free Supercharging)") that isn't in schema.org JSON-LD at
+all. **One honest asymmetry vs. AutoScout24 remains**: fuel type,
+transmission, engine power, and CO2/fuel-consumption figures come from
+schema.org JSON-LD, which unfiltered searches have and filtered searches
+don't (AutoUncle suppresses JSON-LD on any filtered page) — so `--no-detail`
+on a filtered search misses just those few fields, plus full price history
+and equipment, versus a full detail visit. Leave `--no-detail` off (the
+default) for those.
 
 ## Two-level scraping
 
@@ -161,14 +167,18 @@ you want to call them directly instead of going through `scrape()`:
 
 1. **Level 1 (search)** — `search_listings()` (unfiltered) or
    `search_listings_filtered()` (any price/mileage/year filter) — finds
-   every matching listing *without opening a single ad*. Cheap: 1 request
-   per ~25 results. This is what `detail=False`/`--no-detail` stops at, and
-   what you'd use to evaluate your own extra criteria against the summary
+   every matching listing *without opening a single ad*. Cheap: 1-2
+   requests per ~25 results (unfiltered searches make a second request per
+   page to pick up the search-card fields JSON-LD doesn't carry - see
+   below; filtered searches get those from the same request they already
+   make). This is what `detail=False`/`--no-detail` stops at, and what
+   you'd use to evaluate your own extra criteria against the summary
    fields before deciding whether level 2 is worth it.
 2. **Level 2 (detail)** — `visit_all_listings()`/`fetch_detail()` — visits
-   each matching listing's own page for everything level 1 doesn't have:
-   full address, price history, gallery, equipment, and the `firstSeenAt`
-   timestamp. One request per listing.
+   each matching listing's own page for everything level 1 still doesn't
+   have: fuel type, transmission, engine power, CO2/consumption figures,
+   full price history, equipment, and the `firstSeenAt` timestamp derived
+   from it. One request per listing.
 
 `--max-results`/`max_results` keeps the search fast on a large result set by
 capping things off **before** level 2, not after: only the first N ids that

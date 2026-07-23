@@ -37,8 +37,8 @@ was tried and ruled out, is in the module docstring of
 | What | Mechanism | Functions |
 |---|---|---|
 | Brand/model reference data | `GET /api/v4/car_search_form/config` — a public, unauthenticated REST endpoint | `fetch_search_form_config()`, `resolve_make_key()`, `resolve_model_key()` |
-| Unfiltered search (no price/mileage/year filter) | schema.org JSON-LD on the canonical, paginated brand/model page | `search_listings()`, `parse_vehicle_jsonld()` |
-| Filtered search (price/mileage/year/body type/fuel type/colors/doors/seller kind/equipment/...) | Next.js RSC ("Flight") response, fetched from a URL of plain `s[...]` query params - the server's own embedded redirect handles turning some of those into an SEO slug | `build_filtered_search_url()`, `fetch_rsc_page()`, `parse_rsc_pagination()`, `parse_rsc_listing_ids()`, `search_listings_filtered()` |
+| Unfiltered search (no price/mileage/year filter) | schema.org JSON-LD on the canonical, paginated brand/model page, topped up with the same page's RSC ("Flight") response for the search-card fields JSON-LD doesn't carry (see below) | `search_listings()`, `parse_vehicle_jsonld()`, `extract_search_card_supplements()` |
+| Filtered search (price/mileage/year/body type/fuel type/colors/doors/seller kind/equipment/...) | Next.js RSC ("Flight") response, fetched from a URL of plain `s[...]` query params - the server's own embedded redirect handles turning some of those into an SEO slug | `build_filtered_search_url()`, `fetch_rsc_page()`, `parse_rsc_pagination()`, `parse_rsc_listing_ids()`, `extract_search_card_supplements()`, `search_listings_filtered()` |
 | Listing detail | JSON-LD on the detail page, plus a BeautifulSoup pass over the same page for gallery/equipment/source-listing | `fetch_detail()`, `parse_detail_jsonld()`, `extract_gallery_images()`, `extract_equipment()`, `extract_source_listing()` |
 | Fast match count (optional) | AutoUncle's own GraphQL `countCars` query | `count_cars()`, `build_car_search_input()` |
 
@@ -47,10 +47,21 @@ via raw HTTP fetch and full browser navigation) that AutoUncle's server only
 emits the JSON-LD block on the plain, unfiltered brand/model URL (optionally
 paginated with `?page=N`) — any filter, in any URL form, gets `<meta
 name="robots" content="noindex, follow">` and no JSON-LD at all. So a
-filtered search has to use a different data source (RSC), which in turn
-carries no rich per-listing fields — only ids. That's why a filtered
-`scrape(..., detail=False)` call returns rows with only an `id` field; get
-everything else via the detail phase (`detail=True`, the default).
+filtered search has to use a different data source: the same RSC ("Flight")
+response its own frontend renders search-result cards from. That response
+turns out to carry a rich per-listing JSON object of its own (see
+`extract_search_card_supplements()`/`parse_search_card_object()`) — price,
+mileage, year, doors, body type, model/trim, price rating, savings vs.
+market, price-change percent, days listed, source marketplace, full
+address, and the image gallery — everything visible on the search page
+itself, just not schema.org-shaped. It does NOT carry fuel type,
+transmission, engine power, or CO2/consumption figures - AutoUncle's search
+cards simply don't render those, so a filtered `scrape(..., detail=False)`
+call's rows have everything except those few fields (and full price
+history/equipment) until a detail visit (`detail=True`, the default).
+Unfiltered searches fetch this same RSC data too (one extra request per
+page), purely to fill in what JSON-LD doesn't have - JSON-LD stays
+authoritative for every field it does carry.
 
 ### The filtered-search URL rule
 
@@ -233,36 +244,51 @@ search-result order", which is not confirmed to be a date sort - so
 A JSON array of listing objects. AutoUncle publishes no fixed schema for
 these — treat unknown/missing fields defensively (`.get(...)`, not `[...]`).
 
-**Unfiltered search, `detail=False`** — from JSON-LD, already fairly rich:
+**Unfiltered search, `detail=False`** — from JSON-LD, topped up with the
+RSC search-card fields below (see `extract_search_card_supplements()`):
 
 | Field | Type | Description |
 |---|---|---|
 | `id` | `string` | AutoUncle's internal listing id |
 | `url` | `string` | Full URL of the original ad |
 | `make`, `model` | `string` | |
+| `modelVariant` | `string \| None` | Trim/spec line under the title, e.g. `"P90D (Free Supercharging)"` - RSC-only, not in JSON-LD at all |
 | `year` | `int \| None` | First-registration year |
 | `price`, `priceCurrency` | `number \| None`, `string \| None` | |
 | `mileageKm` | `int \| None` | |
-| `fuelType`, `transmission`, `bodyType` | `string \| None` | Free-form German-locale strings (e.g. `"Benzin"`, `"Schaltgetriebe"`, `"Cabrio"`) |
-| `enginePowerPs`, `enginePowerKw`, `engineDisplacementL` | `number \| None` | |
-| `fuelConsumptionL100km`, `co2GKm` | `number \| None` | |
-| `addressCountry` | `string \| None` | Only the country is present at search-result granularity; full address requires the detail phase |
-| `imageUrl`, `imageCaption` | `string \| None` | One thumbnail; the full gallery is detail-only |
+| `fuelType`, `transmission`, `bodyType` | `string \| None` | Free-form German-locale strings (e.g. `"Benzin"`, `"Schaltgetriebe"`, `"Cabrio"`) - JSON-LD only, not in the RSC search card |
+| `enginePowerPs`, `enginePowerKw`, `engineDisplacementL` | `number \| None` | JSON-LD only |
+| `fuelConsumptionL100km`, `co2GKm` | `number \| None` | JSON-LD only |
+| `addressLocality`, `addressRegion`, `postalCode`, `addressCountry` | `string \| None` | Full seller address - the locality/region/postal code come from the RSC search card, not JSON-LD (which only has the country at this level) |
+| `imageUrl`, `imageCaption` | `string \| None` | One thumbnail (JSON-LD) |
+| `imageUrls` | `list[string] \| None` | The listing's full image gallery - RSC-only, no detail visit needed |
+| `priceRatingLabel` | `string \| None` | AutoUncle's own price-rating label, e.g. `"Guter Preis"` - RSC-only at this level |
+| `savingsVsMarketChf` | `int \| None` | Savings vs. AutoUncle's estimated market price |
+| `estimatedMarketPriceChf` | `int \| None` | AutoUncle's own estimated market price for this listing |
+| `priceChangePercent` | `int \| None` | e.g. `-36` for a 36% price drop since first listed |
+| `daysOnMarket` | `int \| None` | Days since first listed |
+| `sourcePlatform`, `sourcePath` | `string \| None` | For listings aggregated from another portal (e.g. `"Autoscout24"`) - name and outgoing link path |
 | `numberOfDoors` | `int \| None` | |
-| `itemCondition`, `availability` | `string \| None` | schema.org URLs, e.g. `"https://schema.org/UsedCondition"` |
+| `itemCondition`, `availability` | `string \| None` | schema.org URLs, e.g. `"https://schema.org/UsedCondition"` (JSON-LD only) |
 
-**Filtered search, any `detail=False`** — id only: `{"id": "<listing id>"}`.
-RSC (the filtered-search data source) carries no summary fields at all.
+**Filtered search, `detail=False`** — the same RSC search-card fields as
+above (`id`, `make`, `model`, `modelVariant`, `year`, `mileageKm`,
+`numberOfDoors`, `bodyType`, `price`, `priceCurrency`, `priceRatingLabel`,
+`savingsVsMarketChf`, `estimatedMarketPriceChf`, `priceChangePercent`,
+`daysOnMarket`, address fields, `imageUrl`/`imageUrls`/`imageCaption`,
+`sourcePlatform`/`sourcePath`) - but **not** `fuelType`, `transmission`,
+`enginePowerPs`/`enginePowerKw`/`engineDisplacementL`, or
+`fuelConsumptionL100km`/`co2GKm`, since AutoUncle's search cards don't
+carry those at all (JSON-LD does, but is suppressed on filtered pages -
+see "How the data is gathered" above). A listing id this couldn't find/parse
+a card object for falls back to `{"id": "<listing id>"}` alone.
 
-**Any search with `detail=True`** (the default) — everything above, plus
-whatever the detail page adds:
+**Any search with `detail=True`** (the default) — everything above (with
+JSON-LD now filling in whatever the RSC search card didn't have, for a
+filtered search too), plus whatever the detail page adds:
 
 | Field | Type | Description |
 |---|---|---|
-| `addressLocality`, `addressRegion`, `postalCode` | `string \| None` | Full seller address (search-result JSON-LD only has `addressCountry`) |
-| `priceRatingLabel` | `string \| None` | AutoUncle's own price-rating label, e.g. `"Fairer Preis"` |
-| `savingsVsMarketChf` | `number \| None` | Savings vs. AutoUncle's estimated market price |
-| `daysOnMarket` | `int \| None` | |
 | `fuelConsumptionLabel`, `co2EmissionsLabel` | mirrors `fuelConsumptionL100km`/`co2GKm` from a second source (`additionalProperty`) |
 | `otherProperties` | `list[{name, value}]` | Any `additionalProperty` entry not recognized by the fixed label table in `ADDITIONAL_PROPERTY_LABELS` — nothing is silently dropped |
 | `priceHistory` | `list[{date, price, currency, description}]` | Full historical price time series. **Not exposed by AutoScout24 at all.** |
@@ -313,24 +339,41 @@ AutoUncle changes something, roughly in order of fragility:
    Flight wire format, which is framework-internal and not a stable public
    contract. `parse_rsc_listing_ids()` raises `RuntimeError` rather than
    silently returning nothing if this ever breaks (see its docstring).
-3. **`CarSearchInput`'s field list is confirmed-by-probing, not exhaustive**
+3. **The RSC search-card JSON object**
+   (`extract_search_card_supplements()`/`parse_search_card_object()`) —
+   relies on AutoUncle's frontend still serializing each search-result card
+   as a `{"carId": ..., "subtitle": ..., ...}`-shaped object somewhere in
+   the RSC response, and on specific field names within it (`subtitle`,
+   `laytime`, `youSaveDifference`, `priceChange`, `location`,
+   `modalPriceHistoryValues.estimatedPrice`, `sourceName`, `outgoingPath`,
+   `imageUrls`, ...). A renamed field just goes missing (`None`) rather
+   than breaking anything, since every read is a `.get(...)`, but a
+   restructured card shape (e.g. these fields nested one level deeper)
+   would silently stop matching. `_json_object_containing()` itself (the
+   brace-matching JSON extractor) doesn't depend on any of AutoUncle's
+   specific field names, only on the response staying valid, embedded JSON
+   somewhere - the most stable part of this mechanism.
+4. **`CarSearchInput`'s field list is confirmed-by-probing, not exhaustive**
    — the table above covers everything tried (including all ~30 equipment
    flags, which weren't individually tested but follow one confirmed,
    consistent pattern), but a redesign of AutoUncle's filter UI could
    add/rename fields this scraper doesn't know about, and a few plausible
    ones (seats, transmission, region) were tried and never found under any
    reasonable name.
-4. **`dealerName`/`description`/`vin`** always returning `None` — this
+5. **`dealerName`/`description`/`vin`** always returning `None` — this
    reflects every listing checked at the time of writing, not a guarantee
    that AutoUncle never renders these for any listing.
-5. **`firstSeenAt`/`lastUpdatedAt` being derived from `priceHistory`
+6. **`firstSeenAt`/`lastUpdatedAt` being derived from `priceHistory`
    extremes** rather than a dedicated field — because there isn't one (the
    JSON-LD `Dataset`'s own `datePublished`/`dateModified` were tried first
    and found to be request-time noise, not real listing metadata - see the
    data-structure table above). If AutoUncle ever exposes a real "date
    posted" field, or changes what `priceHistory` contains, this derivation
-   needs revisiting.
-6. **The `/api/v4/car_search_form/config` endpoint and JSON-LD shape** are
+   needs revisiting. Note the RSC search card's own `lastObservedAt` field
+   was deliberately NOT wired up here, to avoid two differently-derived
+   fields with overlapping meaning; it's available in the raw RSC response
+   if a future need justifies adding it.
+7. **The `/api/v4/car_search_form/config` endpoint and JSON-LD shape** are
    the most stable of the mechanisms here (a documented-in-spirit REST
    endpoint and a public schema.org vocabulary respectively), but neither
    is a versioned, published contract either.
@@ -345,6 +388,7 @@ AutoUncle changes something, roughly in order of fragility:
 | `parse_detail_jsonld`/`_price_history_from_dataset` | real fixture parsing, missing-Dataset handling, unparseable price-history entries skipped | real detail fetch |
 | `extract_gallery_images`/`extract_equipment`/`extract_source_listing` | real fixture extraction, alt-text scoping (excluding unrelated "similar cars" thumbnails), structural edge cases | implicitly, via real data |
 | `build_filtered_search_url`/`parse_rsc_pagination`/`parse_rsc_listing_ids`/`search_listings_filtered` | 4 real RSC fixture captures (single- and multi-filter, pages 1-2, with/without max-price slug), zero-results vs. broken-pattern distinction | full live paginated run (903/903 listings across 37 pages) |
+| `extract_search_card_supplements`/`parse_search_card_object`/`_json_object_containing`/`_find_matching_brace` | synthetic real-shaped card objects (full field mapping, missing fields, unparseable/malformed JSON, nested-object brace-matching edge cases), unfiltered-search merge (fills gaps, never overwrites JSON-LD) | real Tesla Model S listing cross-checked against the rendered search page |
 | `count_cars`/`build_car_search_input` | mocked GraphQL request/response, error handling | live count for a real filter |
 | `flatten_listing`/`_scalarize`/`order_fieldnames` | every branch (nested dicts, lists, the 3 scraper-specific rules, missing/unrecognized types) | implicitly, via real data |
 | `save_csv`/`save_json`/`ScrapeResult` | heterogeneous rows, unicode, empty input | round-trip against real files |

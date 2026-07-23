@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-23
+
+### Added
+
+- Level-1 (search) scraping now captures nearly everything visible on
+  AutoUncle's search-result page itself, without opening a single ad -
+  closing a gap where fields like the model/trim line (e.g. "P90D (Free
+  Supercharging)") were silently missing: `modelVariant`, `priceRatingLabel`,
+  `savingsVsMarketChf`, `estimatedMarketPriceChf`, `priceChangePercent`,
+  `daysOnMarket`, `sourcePlatform`/`sourcePath`, full `addressLocality`/
+  `addressRegion`/`postalCode`, and the full `imageUrls` gallery. Sourced
+  from the same RSC ("Flight") response AutoUncle's own frontend renders
+  search-result cards from (`extract_search_card_supplements()`,
+  `parse_search_card_object()`), which turns out to carry a much richer
+  per-listing JSON object than previously used.
+- Filtered searches (`price_to`/`year_from`/etc.) now return real summary
+  fields even with `detail=False` - previously they returned bare
+  `{"id": ...}` rows, since the RSC mechanism was thought to carry no
+  per-listing data at all; it does, just not schema.org-shaped. Fuel type,
+  transmission, engine power, and CO2/consumption figures still require a
+  detail visit, since AutoUncle's search cards don't render those either
+  way.
+- Unfiltered searches make one extra request per page (fetching the same
+  page's RSC response) to pick up the fields above; JSON-LD stays
+  authoritative for everything it already provides - the RSC data only
+  fills gaps, never overwrites.
+
+### Fixed
+
+- RSC/Flight responses (`Content-Type: text/x-component`, no charset) were
+  being decoded as ISO-8859-1 instead of UTF-8 - `requests`' RFC-default
+  fallback for undeclared charsets - silently mangling non-ASCII text (e.g.
+  `"Graubünden"` -> `"GraubÃ¼nden"`). AutoUncle's responses are UTF-8
+  regardless of what they declare; `request_with_retries()` now corrects
+  the encoding whenever a response doesn't declare a charset.
+
 ## [0.3.0] - 2026-07-23
 
 ### Changed

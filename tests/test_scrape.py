@@ -254,10 +254,10 @@ class TestScrapeFiltered:
         assert "extra {'euroEmissionClass': 6}" in caplog.text
 
     @responses.activate
-    def test_filtered_no_detail_logs_warning(self, search_form_config, no_sleep, caplog):
+    def test_filtered_no_detail_logs_info_note(self, search_form_config, no_sleep, caplog):
         import logging
 
-        caplog.set_level(logging.WARNING, logger="autouncle_scraper")
+        caplog.set_level(logging.INFO, logger="autouncle_scraper")
         _mock_config(search_form_config)
         responses.add(
             responses.GET,
@@ -266,7 +266,7 @@ class TestScrapeFiltered:
             status=200,
         )
         au.scrape("VW", "Golf", price_to=5000, detail=False)
-        assert "RSC (the filtered-search data source) carries no summary fields" in caplog.text
+        assert "not fuel type, transmission, engine power" in caplog.text
 
 
 class TestScrapeMaxResults:

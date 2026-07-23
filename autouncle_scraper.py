@@ -23,7 +23,13 @@ on what you ask for:
      listing (price, mileage, year, engine, fuel, transmission, body type,
      one thumbnail). `numberOfItems` on the ItemList is the grand total
      across all pages. Confirmed: plain `?page=N` pagination preserves this
-     JSON-LD block; nothing else does (see point 3).
+     JSON-LD block; nothing else does (see point 3). This module also
+     fetches the same page's RSC response (see point 3.b) to fill in the
+     search-card fields JSON-LD never carries at all - model/trim
+     ("modelVariant"), price-rating label, savings vs. market, price-change
+     percent, days listed, source marketplace, full address, and the image
+     gallery (extract_search_card_supplements()) - one extra request per
+     page, merged in without ever overwriting a field JSON-LD already set.
 
   3. Filtered search results (any price/mileage/year filter):
      Confirmed by both raw HTTP fetch and full browser navigation: as soon
@@ -40,12 +46,21 @@ on what you ask for:
        b. Fetch that URL per page with the header `RSC: 1`, which returns
           Next.js's React Server Component "Flight" wire format instead of
           full HTML. Rather than writing a general Flight-protocol
-          deserializer, this module extracts only two things via small
-          targeted regexes: pagination metadata and the ordered list of
-          listing ids on the page (fetch_rsc_page(), parse_rsc_pagination(),
-          parse_rsc_listing_ids()). Filtered search therefore only ever
-          yields listing ids, not rich summary fields - the detail phase
-          (point 4) is what fills those in, same as the unfiltered path.
+          deserializer, this module extracts pagination metadata and the
+          ordered list of listing ids on the page via small targeted
+          regexes (fetch_rsc_page(), parse_rsc_pagination(),
+          parse_rsc_listing_ids()) - AND each search-result card's own
+          embedded JSON object (extract_search_card_supplements(),
+          parse_search_card_object()), found by locating a balanced JSON
+          object literal around each "carId" key rather than a full Flight
+          deserializer. That card object is surprisingly rich - price,
+          mileage, year, doors, body type, model/trim, price rating,
+          savings vs. market, price-change percent, days listed, source
+          marketplace, full address, image gallery - everything visible on
+          the search page itself. It does NOT carry fuel type,
+          transmission, engine power, or CO2/consumption figures, since
+          AutoUncle's search cards simply don't render those - the detail
+          phase (point 4) is what fills those in, for both search paths.
        c. AutoUncle's GraphQL endpoint also exposes a `countCars` query
           with the same filter shape, confirmed live and used as a fast,
           optional total-count check (count_cars()) - it is a supplement,
@@ -114,7 +129,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 @dataclass(frozen=True)
@@ -201,6 +216,15 @@ def request_with_retries(
             time.sleep(wait)
             continue
         resp.raise_for_status()
+        if "charset" not in resp.headers.get("Content-Type", "").lower():
+            # requests defaults .encoding to ISO-8859-1 (per RFC 2616) for any
+            # response that doesn't declare a charset - AutoUncle's RSC/Flight
+            # responses (Content-Type: text/x-component) are real UTF-8 but
+            # fall into exactly that gap, which silently mangles non-ASCII
+            # text (e.g. "Graubünden" -> "GraubÃ¼nden"). Confirmed live that
+            # every AutoUncle response is actually UTF-8 regardless of
+            # whether it says so.
+            resp.encoding = "utf-8"
         return resp
     raise RuntimeError("unreachable")  # pragma: no cover
 
@@ -454,7 +478,15 @@ def search_listings(
     search-result pages' JSON-LD, paginating until numberOfItems is fully
     collected. Each returned dict is a parse_vehicle_jsonld() summary record
     (already fairly rich - price, mileage, year, engine, fuel, transmission,
-    body type - though not as complete as a detail-page visit)."""
+    body type) topped up with the search-card fields JSON-LD never carries
+    at all - model/trim ("modelVariant"), price-rating label, savings vs.
+    market, price-change percent, days listed, source marketplace, full
+    address, and the image gallery - by also fetching the same page's RSC
+    payload and merging in whatever parse_vehicle_jsonld() left as None
+    (see extract_search_card_supplements()). That's one extra request per
+    page (not per listing), so this remains far cheaper than a detail-page
+    visit while still surfacing everything visible on the search page
+    itself without opening a single ad."""
     listings: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     page = 1
@@ -479,6 +511,9 @@ def search_listings(
         if total_elements is not None:
             total_pages = max(1, -(-total_elements // page_size))  # ceil division
 
+        time.sleep(delay)
+        card_supplements = extract_search_card_supplements(fetch_rsc_page(url, session=session))
+
         new_count = 0
         for element in items:
             vehicle = parse_vehicle_jsonld(element.get("item", {}))
@@ -486,6 +521,9 @@ def search_listings(
             if listing_id and listing_id not in seen_ids:
                 seen_ids.add(listing_id)
                 vehicle["url"] = f"https://{domain_cfg.host}/{domain_cfg.locale}/d/{listing_id}"
+                for key, value in card_supplements.get(listing_id, {}).items():
+                    if value is not None and vehicle.get(key) is None:
+                        vehicle[key] = value
                 listings.append(vehicle)
                 new_count += 1
 
@@ -1010,6 +1048,151 @@ def parse_rsc_listing_ids(rsc_text: str) -> list[str]:
     return ids
 
 
+_CARD_CAR_ID_KEY_RE = re.compile(r'"carId"\s*:\s*"(\d+)"')
+_LOCATION_RE = re.compile(r"^(\d{4,5})\s+(.+?),\s*(.+)$")
+
+
+def _find_matching_brace(text: str, start: int) -> int | None:
+    """Return the index of the '}' that closes the '{' at `start`, treating
+    text inside JSON string literals as opaque (so a brace character in,
+    say, a listing title never throws off the depth count)."""
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif c == "\\":
+                escape = True
+            elif c == '"':
+                in_string = False
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return None
+
+
+def _json_object_containing(text: str, key_index: int) -> dict[str, Any] | None:
+    """Find and parse the smallest well-formed JSON object literal in `text`
+    that has a "carId" key at or after `key_index` - used to pull one
+    search-result card's data out of a much larger RSC/Flight response
+    without writing a full Flight deserializer. Walks backward through
+    candidate opening braces until one both closes past `key_index` and
+    parses as a JSON object containing "carId" directly."""
+    search_from = key_index
+    while True:
+        start = text.rfind("{", 0, search_from)
+        if start == -1:
+            return None
+        end = _find_matching_brace(text, start)
+        if end is not None and end >= key_index:
+            try:
+                obj = json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                obj = None
+            if isinstance(obj, dict) and "carId" in obj:
+                return obj
+        search_from = start
+
+
+def _parse_chf_amount(value: Any) -> int | None:
+    """ "CHF\xa026’217" (or any other digit-grouping/whitespace
+    AutoUncle's frontend renders) -> 26217."""
+    if not isinstance(value, str):
+        return None
+    digits = re.sub(r"[^\d]", "", value)
+    return int(digits) if digits else None
+
+
+def _parse_location_string(value: str) -> dict[str, Any]:
+    """ "7546 Scuol, Graubünden" -> postalCode/addressLocality/addressRegion.
+    Returns {} (rather than guessing) if the string doesn't match the
+    expected "<postal code> <locality>, <region>" shape."""
+    m = _LOCATION_RE.match(value.strip())
+    if not m:
+        return {}
+    return {"postalCode": m.group(1), "addressLocality": m.group(2), "addressRegion": m.group(3)}
+
+
+def parse_search_card_object(obj: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one search-result card's RSC JSON object (see
+    extract_search_card_supplements()) into the same field-name vocabulary
+    parse_vehicle_jsonld() uses, so unfiltered JSON-LD items and filtered
+    RSC cards are as directly comparable as AutoUncle's own data allows."""
+    # "location"/"price"/"priceChange" are top-level fields on the card
+    # object itself - modalPriceHistoryValues is a separate, parallel
+    # sub-object for the price-history popup with its own (mostly
+    # duplicate) "estimatedPrice"/"youSave" pair, and no "location" at all.
+    modal = obj.get("modalPriceHistoryValues") or {}
+    location = obj.get("location")
+    address = _parse_location_string(location) if isinstance(location, str) else {}
+    image_urls = obj.get("imageUrls") or []
+    title = obj.get("title")
+    price_rating_label = title.rsplit(" | ", 1)[1] if isinstance(title, str) and " | " in title else None
+
+    return {
+        "id": obj.get("carId"),
+        "make": obj.get("brand"),
+        "model": obj.get("carModel"),
+        "modelVariant": obj.get("subtitle") or None,
+        "year": _to_int(obj.get("year")),
+        "mileageKm": _to_int(obj.get("km")),
+        "numberOfDoors": _to_int(obj.get("doors")),
+        "bodyType": obj.get("body"),
+        "price": _parse_chf_amount(obj.get("price")),
+        "priceCurrency": (obj.get("countryCurrencyCode") or "").upper() or None,
+        "priceRatingLabel": price_rating_label,
+        "savingsVsMarketChf": obj.get("youSaveDifference"),
+        "priceChangePercent": obj.get("priceChange"),
+        "estimatedMarketPriceChf": _parse_chf_amount(modal.get("estimatedPrice")),
+        "daysOnMarket": obj.get("laytime"),
+        "addressLocality": address.get("addressLocality"),
+        "addressRegion": address.get("addressRegion"),
+        "postalCode": address.get("postalCode"),
+        "imageUrl": image_urls[0] if image_urls else None,
+        "imageUrls": image_urls or None,
+        "imageCaption": obj.get("imageAltText"),
+        "sourcePlatform": obj.get("sourceName"),
+        "sourcePath": obj.get("outgoingPath"),
+    }
+
+
+def extract_search_card_supplements(rsc_text: str) -> dict[str, dict[str, Any]]:
+    """Extract every search-result card AutoUncle's frontend renders in an
+    RSC/Flight response - present for both unfiltered and filtered search
+    pages when fetched with header {"RSC": "1"} (see fetch_rsc_page()), but
+    NOT in the JSON-LD ItemList, and NOT in the plain HTML an unfiltered
+    request without that header gets. This is where fields like the
+    model/trim line under the title ("P90D (Free Supercharging)"),
+    AutoUncle's own price-rating label, savings vs. market, price-change
+    percent, days listed, the aggregated source marketplace + outgoing
+    link, full seller address, and the listing's own image gallery all
+    live - all visible on the search page itself, without opening a single
+    ad. Returns {listing_id: parse_search_card_object(...)}; a card this
+    can't confidently parse is just absent from the result rather than
+    raising, since this is a supplement to JSON-LD, not the primary
+    source for the unfiltered path (it IS the primary source for the
+    filtered path - see search_listings_filtered())."""
+    supplements: dict[str, dict[str, Any]] = {}
+    for m in _CARD_CAR_ID_KEY_RE.finditer(rsc_text):
+        car_id = m.group(1)
+        if car_id in supplements:
+            continue
+        obj = _json_object_containing(rsc_text, m.start())
+        if obj is None:
+            continue
+        supplements[car_id] = parse_search_card_object(obj)
+    return supplements
+
+
 def _validate_choice(name: str, value: str, allowed: list[str]) -> None:
     if value not in allowed:
         raise ValueError(f"{name} {value!r} is not one of {allowed}")
@@ -1153,12 +1336,21 @@ def search_listings_filtered(
     delay: float = 0.4,
     verbose: bool = True,
 ) -> list[dict[str, Any]]:
-    """Collect every listing id matching a CarSearchInput-shaped filter dict
+    """Collect every listing matching a CarSearchInput-shaped filter dict
     (see build_car_search_input()), via the RSC mechanism described in the
     section docstring above. Unlike search_listings() (the unfiltered/
-    JSON-LD path), each returned dict only has an "id" key - RSC carries no
-    rich per-listing summary fields, so the detail phase
-    (visit_all_listings()) is what fills in everything else."""
+    JSON-LD path), there's no schema.org JSON-LD here at all - AutoUncle
+    suppresses it on any filtered page - so each returned dict is built
+    entirely from the RSC response's own per-card JSON objects (see
+    parse_search_card_object()/extract_search_card_supplements()): id,
+    make/model/modelVariant, year, mileage, doors, body type, price, price
+    rating, savings vs. market, price-change percent, days listed, source
+    marketplace, full address, and the image gallery. Notably absent
+    compared to the unfiltered/JSON-LD path: fuel type, transmission,
+    engine power, CO2/fuel-consumption figures - AutoUncle's search cards
+    simply don't render those, so they stay None until a detail visit. A
+    listing id this couldn't find/parse a card object for falls back to a
+    bare `{"id": ...}`, same as the old behavior, rather than dropping it."""
     listings: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
     page = 1
@@ -1169,12 +1361,13 @@ def search_listings_filtered(
         rsc_text = fetch_rsc_page(url, session=session)
         pagination = parse_rsc_pagination(rsc_text)
         ids = parse_rsc_listing_ids(rsc_text)
+        card_supplements = extract_search_card_supplements(rsc_text)
 
         new_count = 0
         for listing_id in ids:
             if listing_id not in seen_ids:
                 seen_ids.add(listing_id)
-                listings.append({"id": listing_id})
+                listings.append(card_supplements.get(listing_id) or {"id": listing_id})
                 new_count += 1
 
         if verbose:
@@ -1206,6 +1399,7 @@ PRIORITY_FIELDS = [
     "id",
     "make",
     "model",
+    "modelVariant",
     "year",
     "firstSeenAt",
     "price",
@@ -1218,6 +1412,8 @@ PRIORITY_FIELDS = [
     "enginePowerKw",
     "priceRatingLabel",
     "savingsVsMarketChf",
+    "estimatedMarketPriceChf",
+    "priceChangePercent",
     "daysOnMarket",
     "addressLocality",
     "addressRegion",
@@ -1548,9 +1744,10 @@ def scrape(
         listing_ids = [item["id"] for item in listings if item.get("id")]
         listings = visit_all_listings(listing_ids, domain_cfg=domain_cfg, session=session, delay=delay, verbose=verbose)
     elif filtered:
-        logger.warning(
-            "detail=False on a filtered search keeps only bare listing ids - "
-            "RSC (the filtered-search data source) carries no summary fields, unlike JSON-LD."
+        logger.info(
+            "detail=False on a filtered search still fills in the search-card fields (price, mileage, "
+            "year, address, images, price rating, ...) but not fuel type, transmission, engine power, "
+            "CO2/consumption figures, or price history - those need a detail visit."
         )
 
     rows = [flatten_listing(item) for item in listings]

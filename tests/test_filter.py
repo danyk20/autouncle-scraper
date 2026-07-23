@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import responses
 
@@ -9,6 +11,54 @@ import autouncle_scraper as au
 from tests.conftest import load_fixture
 
 DOMAIN_CFG = au.get_domain_config("ch")
+
+
+def _card_obj(car_id: str, **overrides):
+    """A search-result card's RSC JSON object, shaped like a real capture
+    (see parse_search_card_object()'s docstring) - not a full real capture
+    itself, but every field name/nesting here was confirmed against one."""
+    obj = {
+        "title": "Gebraucht (2017) Tesla Model S 772 PS | Guter Preis",
+        "subtitle": "P90D (Free Supercharging)",
+        "carId": car_id,
+        "sourceName": "Autoscout24",
+        "outgoingPath": "/de-ch/das_wiedersehen/autoscout24-ch/6910126/9222511",
+        "imageUrls": [
+            "https://images.autouncle.com/ch/car_images/aaa_x.webp",
+            "https://images.autouncle.com/ch/car_images/bbb_x.webp",
+        ],
+        "imageAltText": "Gebraucht Tesla Model S 567 kW (772 PS) 2017 Kleinwagen",
+        "km": 125250,
+        "brand": "Tesla",
+        "carModel": "Model S",
+        "laytime": 45,
+        "year": 2017,
+        "doors": 5,
+        "body": "Hatchback",
+        "countryCurrencyCode": "chf",
+        "outgoingPathUnused": None,
+        "youSaveDifference": 2200,
+        "modalPriceHistoryValues": {
+            "estimatedPrice": "CHF\xa026’217",
+            "youSave": "CHF\xa02’200",
+        },
+        "location": "7546 Scuol, Graubünden",
+        "rating": 4,
+        "price": "CHF\xa024’000",
+        "priceChange": -36,
+    }
+    obj.update(overrides)
+    return obj
+
+
+def _rsc_chunk(obj) -> str:
+    """Wrap a card object the way it actually appears in an RSC/Flight
+    response: a numbered chunk line, a React element reference, then the
+    object literal itself - React's own serializer emits compact JSON (no
+    spaces after ':'/','), which is what the extraction regex expects, so
+    match that here rather than json.dumps()'s default spaced-out form."""
+    compact = json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+    return f'69:["$","$Lce",null,{compact}]\n'
 
 
 class TestBuildFilteredSearchUrl:
@@ -146,6 +196,140 @@ class TestParseRscListingIds:
         text = '"resultsInfo":"Zeige 1 - 25 von 903 Resultate"'  # no id-shaped chunks present
         with pytest.raises(RuntimeError, match="RSC listing-id pattern"):
             au.parse_rsc_listing_ids(text)
+
+
+class TestParseChfAmount:
+    def test_parses_display_string_with_thousands_separator(self):
+        assert au._parse_chf_amount("CHF\xa026’217") == 26217
+
+    def test_non_string_returns_none(self):
+        assert au._parse_chf_amount(None) is None
+        assert au._parse_chf_amount(26217) is None
+
+    def test_no_digits_returns_none(self):
+        assert au._parse_chf_amount("n/a") is None
+
+
+class TestParseLocationString:
+    def test_parses_postal_locality_region(self):
+        assert au._parse_location_string("7546 Scuol, Graubünden") == {
+            "postalCode": "7546",
+            "addressLocality": "Scuol",
+            "addressRegion": "Graubünden",
+        }
+
+    def test_unrecognized_shape_returns_empty_dict(self):
+        assert au._parse_location_string("somewhere, unparseable") == {}
+        assert au._parse_location_string("") == {}
+
+
+class TestParseSearchCardObject:
+    def test_parses_all_fields_from_real_shaped_card(self):
+        parsed = au.parse_search_card_object(_card_obj("6910126"))
+        assert parsed == {
+            "id": "6910126",
+            "make": "Tesla",
+            "model": "Model S",
+            "modelVariant": "P90D (Free Supercharging)",
+            "year": 2017,
+            "mileageKm": 125250,
+            "numberOfDoors": 5,
+            "bodyType": "Hatchback",
+            "price": 24000,
+            "priceCurrency": "CHF",
+            "priceRatingLabel": "Guter Preis",
+            "savingsVsMarketChf": 2200,
+            "priceChangePercent": -36,
+            "estimatedMarketPriceChf": 26217,
+            "daysOnMarket": 45,
+            "addressLocality": "Scuol",
+            "addressRegion": "Graubünden",
+            "postalCode": "7546",
+            "imageUrl": "https://images.autouncle.com/ch/car_images/aaa_x.webp",
+            "imageUrls": [
+                "https://images.autouncle.com/ch/car_images/aaa_x.webp",
+                "https://images.autouncle.com/ch/car_images/bbb_x.webp",
+            ],
+            "imageCaption": "Gebraucht Tesla Model S 567 kW (772 PS) 2017 Kleinwagen",
+            "sourcePlatform": "Autoscout24",
+            "sourcePath": "/de-ch/das_wiedersehen/autoscout24-ch/6910126/9222511",
+        }
+
+    def test_missing_optional_fields_default_to_none(self):
+        parsed = au.parse_search_card_object({"carId": "123"})
+        assert parsed["id"] == "123"
+        assert parsed["modelVariant"] is None
+        assert parsed["priceRatingLabel"] is None
+        assert parsed["addressLocality"] is None
+        assert parsed["imageUrl"] is None
+        assert parsed["imageUrls"] is None
+
+    def test_title_without_separator_yields_no_rating_label(self):
+        parsed = au.parse_search_card_object(_card_obj("1", title="Just a plain title, no rating"))
+        assert parsed["priceRatingLabel"] is None
+
+    def test_unparseable_location_yields_no_address_fields(self):
+        parsed = au.parse_search_card_object(_card_obj("1", location="not a real location string"))
+        assert parsed["addressLocality"] is None
+        assert parsed["addressRegion"] is None
+        assert parsed["postalCode"] is None
+
+
+class TestExtractSearchCardSupplements:
+    def test_extracts_single_card_keyed_by_id(self):
+        rsc_text = _rsc_chunk(_card_obj("6910126"))
+        supplements = au.extract_search_card_supplements(rsc_text)
+        assert set(supplements) == {"6910126"}
+        assert supplements["6910126"]["modelVariant"] == "P90D (Free Supercharging)"
+
+    def test_extracts_multiple_cards_with_surrounding_noise(self):
+        rsc_text = (
+            '1:"$Sreact.fragment"\n'
+            + _rsc_chunk(_card_obj("111", subtitle="Trim A"))
+            + '2:["$","div",null,{"className":"_x","children":[false,true]}]\n'
+            + _rsc_chunk(_card_obj("222", subtitle="Trim B"))
+        )
+        supplements = au.extract_search_card_supplements(rsc_text)
+        assert set(supplements) == {"111", "222"}
+        assert supplements["111"]["modelVariant"] == "Trim A"
+        assert supplements["222"]["modelVariant"] == "Trim B"
+
+    def test_carid_key_with_no_enclosing_object_is_skipped(self):
+        # Not real RSC shape - just "carId" text with no JSON object around
+        # it at all, exercising _json_object_containing()'s not-found path.
+        assert au.extract_search_card_supplements('some text "carId":"999" more text') == {}
+
+    def test_no_cards_present_returns_empty_dict(self):
+        assert au.extract_search_card_supplements(load_fixture("rsc_vw_golf_mp5000_page1.txt")) == {}
+
+
+class TestFindMatchingBrace:
+    def test_finds_closing_brace_ignoring_braces_inside_strings(self):
+        text = '{"a": "value with { and } inside"}'
+        assert au._find_matching_brace(text, 0) == len(text) - 1
+
+    def test_handles_escaped_quote_inside_string(self):
+        text = r'{"title": "a \" escaped quote", "carId": "1"}'
+        assert au._find_matching_brace(text, 0) == len(text) - 1
+
+    def test_returns_none_when_never_closed(self):
+        assert au._find_matching_brace('{"a": "no closing brace"', 0) is None
+
+
+class TestJsonObjectContaining:
+    def test_retries_past_a_nested_object_that_closes_before_carid(self):
+        # The nearest '{' before the "carId" key belongs to the *nested*
+        # "nested" object, which closes before "carId" appears - this must
+        # be rejected and the search must fall back to the outer object.
+        text = '{"nested":{"foo":"bar"},"carId":"123"}'
+        key_index = text.index('"carId"')
+        obj = au._json_object_containing(text, key_index)
+        assert obj == {"nested": {"foo": "bar"}, "carId": "123"}
+
+    def test_invalid_json_candidate_is_skipped(self):
+        text = '{"carId":"1",}'  # trailing comma: braces balance, JSON doesn't parse
+        key_index = text.index('"carId"')
+        assert au._json_object_containing(text, key_index) is None
 
 
 class TestBuildCarSearchInput:
