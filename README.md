@@ -36,6 +36,42 @@ this data is meant to be freely reused, with attribution.
 imported, or adapted by AI agents and bots, same as a human developer — see
 [License](#license).
 
+## How filtering works
+
+Every filter you pass — `--price-to`, `--year-from`, `--body-types`, `--equipment`,
+whatever — is sent to AutoUncle's own server and applied **there**, not
+downloaded-then-thrown-away on your machine. Concretely:
+
+1. Your filter arguments (`price_from`, `year_to`, `body_types`, ...) are
+   validated against the known-good option lists (`BODY_TYPES`,
+   `FUEL_TYPES`, `COLORS`, `SELLER_KINDS`, `EQUIPMENT_OPTIONS`) and packed
+   into AutoUncle's own `CarSearchInput` shape.
+2. That's turned into the same kind of URL AutoUncle's own filter form
+   produces: Rails-style nested query params, e.g.
+   `?s[max_price]=80000&s[min_year]=2015&s[body_types][]=SUV`.
+3. AutoUncle frequently has a "pretty" canonical URL for common filters
+   (e.g. a max-price-only search redirects to `.../mp-unter-80000-chf`).
+   The scraper follows that redirect automatically — it's a signal embedded
+   in the response, not a real HTTP 3xx, so a plain HTTP client wouldn't
+   see it, but this scraper does the follow for you.
+4. Every filter is combined with **AND**: `--fuel-types Diesel --body-types
+   SUV` means diesel *and* SUV, never either/or.
+5. Only what AutoUncle itself supports server-side can be filtered this
+   way — there's no client-side post-filtering step hiding a "actually we
+   downloaded everything and threw rows away" fallback. If a filter isn't
+   in the CLI flags or `EQUIPMENT_OPTIONS`/`BODY_TYPES`/etc., check
+   `extra_filters` in [docs/REFERENCE.md](docs/REFERENCE.md) for other
+   confirmed `CarSearchInput` fields before assuming it's unsupported.
+
+The one asymmetry worth knowing: an **unfiltered** search reads AutoUncle's
+schema.org JSON-LD (rich, stable, and already fairly complete without
+opening each ad). Any **filtered** search instead uses AutoUncle's internal
+GraphQL + React-Server-Components data channel — the same one its own
+filter form uses — because AutoUncle deliberately omits JSON-LD from any
+filtered page. That channel only carries listing ids, not full fields,
+which is why the [two-level scraping](#two-level-scraping) detail pass
+matters more for filtered searches than unfiltered ones.
+
 ## Setup
 
 Requires [pipenv](https://pipenv.pypa.io/) (`brew install pipenv`).

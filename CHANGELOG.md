@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-23
+
+### Added
+
+- Explicit two-level scraping model: level 1 (`search_listings()` /
+  `search_listings_filtered()`) finds matching listings without opening a
+  single ad; level 2 (`visit_all_listings()` / `fetch_detail()`) visits
+  each one for the full record. Both levels are documented and usable on
+  their own, not just through `scrape()`.
+- `max_results` / `--max-results`: keep only the N most recently posted
+  matching listings. Requires `detail=True` (recency is only knowable from
+  each listing's own price-history data, not from level-1 summary fields).
+- `firstSeenAt` / `lastUpdatedAt` fields, derived from the earliest/latest
+  dates in each listing's price history.
+- Full server-side filter expansion: `body_types`, `fuel_types`, `colors`,
+  `doors`, `seller_kind`, `one_owner`, `equipment` (with matching CLI
+  flags), plus an `extra_filters` dict for any other confirmed
+  `CarSearchInput` field without its own flag. All choice-based filters are
+  validated up front against known-good option lists, with a clean error
+  listing valid values on a bad one.
+
+### Changed
+
+- `build_filtered_search_url()` / `search_listings_filtered()` now take a
+  single `CarSearchInput`-shaped dict instead of individual price/mileage/
+  year keyword arguments, to accommodate the much larger filter set.
+- AutoUncle's "pretty URL" redirect for common filter combinations (e.g.
+  max-price-only) is now followed generically by detecting the redirect
+  marker embedded in the RSC response, replacing a smaller set of
+  hand-coded slug rules.
+
+### Fixed
+
+- A single sold/removed listing (HTTP 404/410) between the search and
+  detail phase no longer aborts the whole scrape - it's skipped with a
+  warning, and every other error still propagates as before.
+
 ## [0.1.0] - 2026-07-21
 
 Initial release.

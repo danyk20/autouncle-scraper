@@ -114,7 +114,7 @@ from urllib.parse import quote, urlsplit
 import requests
 from bs4 import BeautifulSoup
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 @dataclass(frozen=True)
